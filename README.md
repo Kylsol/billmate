@@ -1,4 +1,3 @@
-````markdown
 # BillMate
 
 BillMate is a multi-tenant expense management iOS application built with **SwiftUI**, **Firebase Authentication**, and **Cloud Firestore**.
