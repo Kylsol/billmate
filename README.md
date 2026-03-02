@@ -29,10 +29,10 @@ Each user can belong to multiple homes. Access is determined dynamically through
 
 Homes are resolved via:
 
-```swift
+
 collectionGroup("members")
     .whereField("uid", isEqualTo: currentUserUid)
-````
+
 
 This design avoids redundant mapping collections and ensures scalability.
 
@@ -42,13 +42,13 @@ This design avoids redundant mapping collections and ensures scalability.
 
 ## Root Collection
 
-```
+
 homes/{homeId}
-```
+
 
 ### Home Document Schema
 
-```json
+
 {
   "name": String,
   "createdAt": Timestamp,
@@ -60,7 +60,7 @@ homes/{homeId}
   "deletedByUid": String,
   "deletedByName": String
 }
-```
+
 
 ---
 
@@ -68,11 +68,11 @@ homes/{homeId}
 
 ### Members
 
-```
-homes/{homeId}/members/{uid}
-```
 
-```json
+homes/{homeId}/members/{uid}
+
+
+
 {
   "uid": String,
   "email": String?,
@@ -80,17 +80,17 @@ homes/{homeId}/members/{uid}
   "role": "admin" | "resident",
   "joinedAt": Timestamp
 }
-```
+
 
 ---
 
 ### Bills
 
-```
-homes/{homeId}/bills/{billId}
-```
 
-```json
+homes/{homeId}/bills/{billId}
+
+
+
 {
   "description": String,
   "amount": Double,
@@ -108,17 +108,17 @@ homes/{homeId}/bills/{billId}
   "deletedByUid": String,
   "deletedByName": String
 }
-```
+
 
 ---
 
 ### Payments
 
-```
-homes/{homeId}/payments/{paymentId}
-```
 
-```json
+homes/{homeId}/payments/{paymentId}
+
+
+
 {
   "amount": Double,
   "date": Timestamp,
@@ -130,17 +130,17 @@ homes/{homeId}/payments/{paymentId}
   "updatedAt": Timestamp?,
   "updatedByUid": String?
 }
-```
+
 
 ---
 
 ### Invites
 
-```
-homes/{homeId}/invites/{code}
-```
 
-```json
+homes/{homeId}/invites/{code}
+
+
+
 {
   "homeId": String,
   "createdByUid": String,
@@ -150,7 +150,7 @@ homes/{homeId}/invites/{code}
   "createdAt": Timestamp,
   "code": String
 }
-```
+
 
 ---
 
@@ -158,12 +158,12 @@ homes/{homeId}/invites/{code}
 
 Each member is assigned a role:
 
-```swift
+
 enum MemberRole: String {
     case admin
     case resident
 }
-```
+
 
 ## Admin Capabilities
 
@@ -193,7 +193,7 @@ BillMate implements a non-destructive deletion model.
 
 Instead of permanently deleting documents, the system applies:
 
-```json
+
 {
   "isDeleted": true,
   "deletedAt": Timestamp,
@@ -201,7 +201,7 @@ Instead of permanently deleting documents, the system applies:
   "deletedByUid": String,
   "deletedByName": String
 }
-```
+
 
 ## Behavior
 
@@ -226,11 +226,11 @@ Primary ViewModels:
 
 Each ViewModel exposes:
 
-```swift
+
 @Published var data
 @Published var errorMessage
 @Published var isBusy
-```
+
 
 Firestore operations are abstracted through `FirestoreService`.
 
@@ -240,9 +240,9 @@ Firestore operations are abstracted through `FirestoreService`.
 
 All Firestore writes are wrapped using Swift Concurrency and continuations:
 
-```swift
+
 withCheckedThrowingContinuation
-```
+
 
 Encoding strategy:
 
@@ -256,20 +256,20 @@ This avoids tight coupling to FirestoreSwift while maintaining async safety.
 
 # UI Structure
 
-```
+
 UI/
  ├── HomeListView
  ├── HomeSettingsView
  ├── BillsView
  ├── PaymentsView
  ├── RecycleBinView
-```
+
 
 Views are driven by shared state:
 
-```swift
+
 @EnvironmentObject var appState: AppState
-```
+
 
 Navigation uses `NavigationStack`.
 
@@ -281,9 +281,9 @@ Firebase Authentication persists sessions locally.
 
 On app launch:
 
-```swift
+
 Auth.auth().currentUser
-```
+
 
 If present, the user is automatically restored.
 
@@ -312,9 +312,9 @@ Permanent deletion is intentionally restricted.
 
 Errors propagate through:
 
-```swift
+
 @Published var errorMessage: String?
-```
+
 
 Displayed inline in UI when present.
 
