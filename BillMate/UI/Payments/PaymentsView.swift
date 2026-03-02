@@ -1,4 +1,5 @@
 import SwiftUI
+import FirebaseFirestore
 
 struct PaymentsView: View {
     @EnvironmentObject private var appState: AppState
@@ -7,13 +8,23 @@ struct PaymentsView: View {
 
     @State private var showAdd = false
 
+    // MARK: - Soft Delete UI State (optional but recommended for consistency)
+
+    /// Payment pending delete confirmation.
+    @State private var paymentPendingDelete: PaymentDoc?
+
+    /// Local error for delete action (vm.errorMessage still shows too).
+    @State private var localError: String?
+
     var body: some View {
         NavigationStack {
             List {
-                if let err = vm.errorMessage {
+                // MARK: - Errors
+                if let err = localError ?? vm.errorMessage {
                     Text(err).foregroundStyle(.red)
                 }
 
+                // MARK: - Payments
                 ForEach(vm.payments) { p in
                     VStack(alignment: .leading, spacing: 6) {
                         Text(p.note.isEmpty ? "Payment" : p.note)
@@ -32,10 +43,27 @@ struct PaymentsView: View {
                             .foregroundStyle(.secondary)
                     }
                     .padding(.vertical, 4)
+
+                    // MARK: - Swipe to Soft Delete (Admin only)
+                    // NOTE:
+                    // This requires PaymentDoc + Firestore data to support isDeleted/deletedAt/etc.
+                    // If you DON'T want payments deletable, remove this swipe action.
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        if appState.activeRole == .admin {
+                            Button(role: .destructive) {
+                                paymentPendingDelete = p
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                    }
                 }
             }
             .navigationTitle("Payments")
+
+            // MARK: - Toolbar
             .toolbar {
+                // Add payment (Admin only)
                 if appState.activeRole == .admin {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { showAdd = true } label: {
@@ -44,6 +72,32 @@ struct PaymentsView: View {
                     }
                 }
             }
+
+            // MARK: - Confirm Soft Delete
+            .confirmationDialog(
+                "Delete Payment?",
+                isPresented: .constant(paymentPendingDelete != nil),
+                titleVisibility: .visible
+            ) {
+                Button("Move to Recycle Bin (30 days)", role: .destructive) {
+                    guard let p = paymentPendingDelete,
+                          let paymentId = p.id,
+                          let homeId = appState.activeHome?.id else { return }
+
+                    paymentPendingDelete = nil
+
+                    Task {
+                        await softDeletePayment(homeId: homeId, paymentId: paymentId)
+                        await reload()
+                    }
+                }
+
+                Button("Cancel", role: .cancel) { paymentPendingDelete = nil }
+            } message: {
+                Text("This payment will be recoverable for 30 days. It will expire automatically after that.")
+            }
+
+            // MARK: - Add Payment Sheet
             .sheet(isPresented: $showAdd) {
                 AddPaymentView { didAdd in
                     if didAdd {
@@ -51,11 +105,15 @@ struct PaymentsView: View {
                     }
                 }
             }
+
+            // MARK: - Initial Load
             .task {
                 await reload()
             }
         }
     }
+
+    // MARK: - Reload
 
     private func reload() async {
         guard let homeId = appState.activeHome?.id else { return }
@@ -64,6 +122,40 @@ struct PaymentsView: View {
         // ✅ load members so we can show names
         await dashVM.loadAll(homeId: homeId)
     }
+
+    // MARK: - Soft Delete Payment (Firestore update)
+
+    /// Soft deletes a payment by marking it deleted and setting an expiration date.
+    /// IMPORTANT: This requires your Payment docs to have the soft-delete fields.
+    private func softDeletePayment(homeId: String, paymentId: String) async {
+        localError = nil
+
+        guard let user = appState.authUser else {
+            localError = "Not signed in."
+            return
+        }
+
+        let now = Date()
+        let expires = Calendar.current.date(byAdding: .day, value: 30, to: now)
+            ?? now.addingTimeInterval(30 * 24 * 3600)
+
+        do {
+            try await FirestoreService.paymentsCol(homeId)
+                .document(paymentId)
+                .setData([
+                    "isDeleted": true,
+                    "deletedAt": Timestamp(date: now),
+                    "deleteExpiresAt": Timestamp(date: expires),
+                    "deletedByUid": user.uid,
+                    "deletedByName": user.name as Any
+                ], merge: true)
+
+        } catch {
+            localError = error.localizedDescription
+        }
+    }
+
+    // MARK: - Helpers
 
     private func paymentWhoLine(_ p: PaymentDoc) -> Text {
         let from = displayName(for: p.paidByUid, members: dashVM.members)

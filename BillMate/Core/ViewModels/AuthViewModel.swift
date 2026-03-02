@@ -6,7 +6,7 @@ import FirebaseAuth
 final class AuthViewModel: ObservableObject {
     @Published var email: String = ""
     @Published var password: String = ""
-    @Published var name: String = ""          // ✅ add this
+    @Published var name: String = ""
 
     @Published var errorMessage: String?
     @Published var isBusy: Bool = false
@@ -68,7 +68,6 @@ final class AuthViewModel: ObservableObject {
                 password: password
             )
 
-            // ✅ store display name on FirebaseAuth user (easy + useful)
             if let user = Auth.auth().currentUser {
                 let req = user.createProfileChangeRequest()
                 req.displayName = trimmedName

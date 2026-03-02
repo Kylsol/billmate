@@ -19,8 +19,10 @@ struct DashboardView: View {
                 .safeAreaInset(edge: .bottom) {
                     NavigationLinksBar(isAdmin: appState.activeRole == .admin)
                 }
-                .sheet(isPresented: $showHomePicker) {
-                    homePickerSheet
+                .sheet(isPresented: $showHomeSettings) {
+                    HomeSettingsView()
+                        .environmentObject(appState)
+                        .environmentObject(homesVM)
                 }
                 .alert("Invite Code", isPresented: $showInviteAlert) {
                     Button("OK", role: .cancel) { }
@@ -102,6 +104,7 @@ struct DashboardView: View {
         }
     }
 
+    @State private var showHomeSettings = false
     @ToolbarContentBuilder
     private var dashboardToolbar: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
@@ -122,6 +125,9 @@ struct DashboardView: View {
 
                 Button("Sign Out", role: .destructive) {
                     appState.signOut()
+                }
+                if appState.activeRole == .admin {
+                    Button("Home Settings") { showHomeSettings = true }
                 }
             } label: {
                 Image(systemName: "ellipsis.circle")
