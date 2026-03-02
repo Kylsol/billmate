@@ -355,36 +355,40 @@ final class HomesViewModel: ObservableObject {
     }
 
 
-    // MARK: - Create Invite (unchanged)
+    // MARK: - Create Invite
 
-    func createInvite(homeId: String) async throws -> String {
+    func createInvite(appState: AppState, homeId: String) async -> String? {
         errorMessage = nil
         isBusy = true
         defer { isBusy = false }
 
-        let code = IDGenerator.inviteCode()
+        guard let user = appState.authUser else {
+            errorMessage = "Not signed in."
+            return nil
+        }
 
-        let invite = InviteDoc(
-            id: code,
-            homeId: homeId,
-            createdByUid: "",
-            expiresAt: Calendar.current.date(byAdding: .day, value: 7, to: Date())
-                ?? Date().addingTimeInterval(7 * 24 * 3600),
-            maxUses: 10,
-            uses: 0,
-            createdAt: Date(),
-            code: code
-        )
+        let code = IDGenerator.inviteCode()
+        let now = Date()
+        let expires = Calendar.current.date(byAdding: .day, value: 7, to: now)
+            ?? now.addingTimeInterval(7 * 24 * 3600)
 
         do {
-            try await FirestoreService.setEncodable(
-                invite,
-                to: FirestoreService.inviteRef(homeId: homeId, code: code)
-            )
+            try await FirestoreService.inviteRef(homeId: homeId, code: code)
+                .setData([
+                    "homeId": homeId,
+                    "createdByUid": user.uid,
+                    "expiresAt": Timestamp(date: expires),
+                    "maxUses": 10,
+                    "uses": 0,
+                    "createdAt": Timestamp(date: now),
+                    "code": code
+                ], merge: true)
+
             return code
+
         } catch {
             errorMessage = error.localizedDescription
-            throw error
+            return nil
         }
     }
 

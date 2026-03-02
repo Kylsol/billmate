@@ -10,6 +10,11 @@ struct DashboardView: View {
     @State private var showInviteAlert = false
     @State private var inviteCode: String = ""
     @State private var inviteError: String?
+    
+    @State private var showShareSheet = false
+    @State private var shareItems: [Any] = []
+
+    @State private var showCopiedAlert = false
 
     var body: some View {
         NavigationStack {
@@ -25,24 +30,32 @@ struct DashboardView: View {
                         .environmentObject(homesVM)
                 }
                 .alert("Invite Code", isPresented: $showInviteAlert) {
+                    Button("Copy Code") {
+                        UIPasteboard.general.string = inviteCode
+                        showCopiedAlert = true
+                    }
+
+                    Button("Share…") {
+                        let msg = inviteShareMessage(code: inviteCode)
+                        shareItems = [msg]
+                        showShareSheet = true
+                    }
+
                     Button("OK", role: .cancel) { }
                 } message: {
                     Text(inviteCode)
                 }
-                .alert(
-                    "Invite Error",
-                    isPresented: Binding(
-                        get: { inviteError != nil },
-                        set: { if !$0 { inviteError = nil } }
-                    )
-                ) {
-                    Button("OK", role: .cancel) { inviteError = nil }
-                } message: {
-                    Text(inviteError ?? "Unknown error")
-                }
                 .task {
                     await loadHomes()
                     await reload()
+                }
+                .sheet(isPresented: $showShareSheet) {
+                    ShareSheet(items: shareItems)
+                }
+                .alert("Copied", isPresented: $showCopiedAlert) {
+                    Button("OK", role: .cancel) { }
+                } message: {
+                    Text("Invite code copied to clipboard.")
                 }
         }
     }
@@ -162,12 +175,16 @@ struct DashboardView: View {
             return
         }
 
-        do {
-            let code = try await homesVM.createInvite(homeId: homeId)
+        if let code = await homesVM.createInvite(appState: appState, homeId: homeId) {
             inviteCode = code
-            showInviteAlert = true
-        } catch {
-            inviteError = error.localizedDescription
+
+            // Auto-open share
+            let msg = inviteShareMessage(code: code)
+            shareItems = [msg]
+            showShareSheet = true
+
+        } else {
+            inviteError = homesVM.errorMessage ?? "Failed to create invite."
         }
     }
 
@@ -189,6 +206,14 @@ struct DashboardView: View {
 
     private func currencyCode() -> String {
         Locale.current.currency?.identifier ?? "USD"
+    }
+    private func inviteShareMessage(code: String) -> String {
+        let homeName = appState.activeHome?.name ?? "my home"
+        return """
+        Join \(homeName) on BillMate.
+
+        Invite code: \(code)
+        """
     }
 }
 
