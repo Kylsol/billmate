@@ -1,11 +1,11 @@
-```markdown
+````markdown
 # BillMate
 
-BillMate is a multi-tenant expense management iOS application built with **SwiftUI**, **Firebase Authentication**, and **Cloud Firestore**.  
+BillMate is a multi-tenant expense management iOS application built with **SwiftUI**, **Firebase Authentication**, and **Cloud Firestore**.
 
 It supports role-based access control, soft deletion with time-based expiration, and structured multi-home data isolation.
 
-This project is structured using an MVVM architecture and leverages async/await for Firestore operations.
+The project follows an MVVM architecture and leverages Swift Concurrency (`async/await`) for Firestore operations.
 
 ---
 
@@ -16,41 +16,38 @@ This project is structured using an MVVM architecture and leverages async/await 
 - SwiftUI
 - Firebase Authentication
 - Cloud Firestore
-- Async/Await (Swift Concurrency)
-- MVVM pattern
+- Swift Concurrency (async/await)
+- MVVM Architecture
 - Firestore collectionGroup queries
 
 ---
 
-## Core Concepts
+# Core Design Principles
 
-### Multi-Tenant Home Model
+## Multi-Tenant Home Model
 
-Each user can belong to multiple homes.  
-Access is determined by membership documents.
+Each user can belong to multiple homes. Access is determined dynamically through membership documents rather than duplicating user-home references.
 
 Homes are resolved via:
 
-```
-
+```swift
 collectionGroup("members")
-.whereField("uid", isEqualTo: currentUserUid)
+    .whereField("uid", isEqualTo: currentUserUid)
+````
 
-```
-
-This avoids storing user-home relationships redundantly in a separate collection.
+This design avoids redundant mapping collections and ensures scalability.
 
 ---
 
 # Firestore Data Model
 
+## Root Collection
+
+```
+homes/{homeId}
 ```
 
-homes/{homeId}
-
-````
-
-### Home Document
+### Home Document Schema
 
 ```json
 {
@@ -64,7 +61,7 @@ homes/{homeId}
   "deletedByUid": String,
   "deletedByName": String
 }
-````
+```
 
 ---
 
@@ -160,7 +157,7 @@ homes/{homeId}/invites/{code}
 
 # Role-Based Access Control
 
-Each member has a `MemberRole`:
+Each member is assigned a role:
 
 ```swift
 enum MemberRole: String {
@@ -169,82 +166,80 @@ enum MemberRole: String {
 }
 ```
 
-### Admin Capabilities
+## Admin Capabilities
 
-* Promote / revoke admin
+* Promote members to admin
+* Revoke admin privileges
 * Remove members
 * Soft delete homes
 * Create invite codes
 
-### Safety Constraints
+## System Safeguards
 
-The system enforces:
+The application enforces:
 
 * A home must always have at least one admin
-* The only admin cannot leave
-* The only member cannot leave
+* The only admin cannot leave without promoting another member
+* The only member cannot leave the home
 * Soft-deleted homes cannot be selected
+* Permanent deletion is not exposed in the UI
 
 These rules are enforced client-side and expected to be mirrored in Firestore Security Rules.
 
 ---
 
-# Soft Delete System
+# Soft Delete Architecture
 
 BillMate implements a non-destructive deletion model.
 
-Instead of deleting documents:
+Instead of permanently deleting documents, the system applies:
 
+```json
+{
+  "isDeleted": true,
+  "deletedAt": Timestamp,
+  "deleteExpiresAt": Timestamp (now + 30 days),
+  "deletedByUid": String,
+  "deletedByName": String
+}
 ```
-isDeleted = true
-deletedAt = now
-deleteExpiresAt = now + 30 days
-deletedByUid = currentUser
-deletedByName = currentUserName
-```
 
-Deleted items:
+## Behavior
 
-* Are excluded from active queries
-* Appear in the Recycle Bin view
-* Can be restored before expiration
-* Cannot be manually permanently deleted
-* Expire automatically after 30 days (expected backend cleanup)
+* Soft-deleted items are excluded from active queries
+* Deleted homes and bills appear in the Recycle Bin
+* Items can be restored before expiration
+* No manual permanent deletion option exists
+* Items are expected to expire automatically after 30 days (backend cleanup)
 
-This prevents irreversible data loss while preserving audit traceability.
+This approach preserves auditability and prevents accidental data loss.
 
 ---
 
-# ViewModel Design
+# ViewModel Layer
 
-Each feature is backed by a ViewModel:
+Primary ViewModels:
 
 * `HomesViewModel`
 * `BillsViewModel`
 * `PaymentsViewModel`
 * `DashboardViewModel`
 
-Firestore operations are wrapped using async helpers in `FirestoreService`.
-
-Example:
+Each ViewModel exposes:
 
 ```swift
-try await FirestoreService.homeRef(homeId).setData(...)
+@Published var data
+@Published var errorMessage
+@Published var isBusy
 ```
 
-State management:
-
-```swift
-@Published var homes: [HomeDoc]
-@Published var errorMessage: String?
-@Published var isBusy: Bool
-```
+Firestore operations are abstracted through `FirestoreService`.
 
 ---
 
-# Async Firestore Handling
+# FirestoreService Design
 
-Firestore writes are wrapped using continuations:
+All Firestore writes are wrapped using Swift Concurrency and continuations:
 
 ```swift
 withCheckedThrowingContinuation
@@ -256,7 +251,7 @@ Encoding strategy:
 * `dateEncodingStrategy = .millisecondsSince1970`
 * Converted to `[String: Any]` before Firestore write
 
-This avoids FirestoreSwift dependency coupling.
+This avoids tight coupling to FirestoreSwift while maintaining async safety.
 
 ---
 
@@ -271,38 +266,38 @@ UI/
  ├── RecycleBinView
 ```
 
-Views are driven by environment state:
+Views are driven by shared state:
 
 ```swift
 @EnvironmentObject var appState: AppState
 ```
 
-Navigation is managed using `NavigationStack`.
+Navigation uses `NavigationStack`.
 
 ---
 
 # Authentication Flow
 
-FirebaseAuth persists sessions locally.
+Firebase Authentication persists sessions locally.
 
-On launch:
+On app launch:
 
 ```swift
 Auth.auth().currentUser
 ```
 
-If present, user state is restored automatically.
+If present, the user is automatically restored.
 
-Explicit sign-out required to clear session.
+Explicit sign-out is required to clear the session.
 
 ---
 
-# Recycle Bin Design
+# Recycle Bin System
 
 RecycleBinView loads:
 
 * Deleted homes
-* Deleted bills (future extension)
+* Deleted bills (extendable)
 
 Displays:
 
@@ -310,61 +305,55 @@ Displays:
 * Expiration date
 * Restore action
 
-Permanent deletion is intentionally not exposed in the UI.
+Permanent deletion is intentionally restricted.
 
 ---
 
 # Error Handling Strategy
 
-Errors propagate to:
+Errors propagate through:
 
 ```swift
-@Published var errorMessage
+@Published var errorMessage: String?
 ```
 
-Displayed inline in views via:
+Displayed inline in UI when present.
 
-```swift
-if let err = errorMessage
-```
-
-Consistency maintained across ViewModels.
+This ensures consistent and centralized error reporting across the app.
 
 ---
 
-# Current System Capabilities
+# Current Capabilities
 
 * Multi-home membership resolution
-* Role-based user management
+* Role-based permission enforcement
 * Invite-based onboarding
-* Soft delete with 30-day expiration
-* Recycle bin restore
-* Admin safety enforcement
+* Soft deletion with expiration tracking
+* Recycle bin restoration
+* Admin protection safeguards
 * Async Firestore integration
-* Structured MVVM architecture
+* Clean MVVM separation
 
 ---
 
-# Future Enhancements
+# Planned Enhancements
 
 * Server-side expiration cleanup
 * Event audit log UI (EventDoc)
-* Balance calculations per user
-* Firestore security rule hardening
+* Balance calculations per member
+* Hardened Firestore Security Rules
 * Optimistic UI updates
-* Offline caching support
+* Offline persistence
 
 ---
 
-# Project Goal
+# Project Purpose
 
-BillMate is designed as a production-style portfolio application demonstrating:
+BillMate demonstrates:
 
-* Multi-tenant Firestore modeling
-* Role-based access enforcement
+* Scalable Firestore data modeling
+* Multi-tenant state management
+* Role-based access control
 * Safe deletion architecture
-* Clean SwiftUI state management
-* Scalable MVVM design
-* Firebase integration best practices
-
-```
+* Structured SwiftUI + MVVM implementation
+* Production-style Firebase integration
