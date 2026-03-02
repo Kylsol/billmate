@@ -8,7 +8,7 @@ struct PaymentsView: View {
 
     @State private var showAdd = false
 
-    // MARK: - Soft Delete UI State (optional but recommended for consistency)
+    // MARK: - Soft Delete UI State
 
     /// Payment pending delete confirmation.
     @State private var paymentPendingDelete: PaymentDoc?
@@ -46,8 +46,7 @@ struct PaymentsView: View {
 
                     // MARK: - Swipe to Soft Delete (Admin only)
                     // NOTE:
-                    // This requires PaymentDoc + Firestore data to support isDeleted/deletedAt/etc.
-                    // If you DON'T want payments deletable, remove this swipe action.
+                    // This assumes your Payment docs support isDeleted/deletedAt/etc.
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         if appState.activeRole == .admin {
                             Button(role: .destructive) {
@@ -76,7 +75,10 @@ struct PaymentsView: View {
             // MARK: - Confirm Soft Delete
             .confirmationDialog(
                 "Delete Payment?",
-                isPresented: .constant(paymentPendingDelete != nil),
+                isPresented: Binding(
+                    get: { paymentPendingDelete != nil },
+                    set: { if !$0 { paymentPendingDelete = nil } }
+                ),
                 titleVisibility: .visible
             ) {
                 Button("Move to Recycle Bin (30 days)", role: .destructive) {
@@ -88,6 +90,8 @@ struct PaymentsView: View {
 
                     Task {
                         await softDeletePayment(homeId: homeId, paymentId: paymentId)
+
+                        // ✅ Force refresh so the payment disappears immediately
                         await reload()
                     }
                 }
@@ -140,6 +144,7 @@ struct PaymentsView: View {
             ?? now.addingTimeInterval(30 * 24 * 3600)
 
         do {
+            // 1) Soft delete the payment
             try await FirestoreService.paymentsCol(homeId)
                 .document(paymentId)
                 .setData([
@@ -149,6 +154,24 @@ struct PaymentsView: View {
                     "deletedByUid": user.uid,
                     "deletedByName": user.name as Any
                 ], merge: true)
+
+            // 2) Log event to feed (Deleted by...)
+            let who = (user.name?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+                ? user.name!
+                : (user.email ?? user.uid)
+
+            let event = EventDoc(
+                id: nil,
+                type: "payment_deleted",
+                actorUid: user.uid,
+                actorName: who,
+                targetType: "payment",
+                targetId: paymentId,
+                message: "Deleted payment",
+                createdAt: Date()
+            )
+
+            _ = try? FirestoreService.eventsCol(homeId).addDocument(from: event)
 
         } catch {
             localError = error.localizedDescription

@@ -1,25 +1,45 @@
+//  EventDoc.swift
+//  BillMate
+//
+//  Firestore model for homes/{homeId}/events/{eventId}
+//  Used for audit logs and activity tracking.
+
 import Foundation
 import FirebaseFirestore
 
-/// Firestore model for homes/{homeId}/events/{eventId}
-/// Used for audit logs and activity tracking.
 struct EventDoc: Codable, Identifiable {
 
-    // Firestore document ID
+    // MARK: - Firestore Document ID
+
     @DocumentID var id: String?
 
-    // What happened
-    var type: String              // e.g. "bill_created", "home_deleted", "member_promoted"
-    var actorUid: String          // who performed the action
-    var actorName: String?        // optional but VERY useful for UI
+    // MARK: - Action Metadata
 
-    // What was affected
-    var targetType: String        // "home", "bill", "member"
-    var targetId: String          // ID of the affected doc
+    /// What happened (examples: "bill_created", "bill_deleted", "payment_deleted", "home_deleted")
+    var type: String
 
-    // Human-readable message for UI
+    /// UID of the user who performed the action
+    var actorUid: String
+
+    /// Display name of the user who performed the action (helps the UI avoid lookups)
+    /// Optional so older event docs decode safely.
+    var actorName: String?
+
+    // MARK: - Target Metadata
+
+    /// What was affected (examples: "home", "bill", "payment", "member")
+    var targetType: String
+
+    /// Document ID of the affected target
+    var targetId: String
+
+    // MARK: - UI Message
+
+    /// Human-readable message for your feed UI
     var message: String
 
-    // When it happened
+    // MARK: - Timestamp
+
+    /// When the event occurred
     var createdAt: Date
 }

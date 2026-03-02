@@ -74,7 +74,10 @@ struct BillsView: View {
             // MARK: - Confirm Soft Delete
             .confirmationDialog(
                 "Delete Bill?",
-                isPresented: .constant(billPendingDelete != nil),
+                isPresented: Binding(
+                    get: { billPendingDelete != nil },
+                    set: { if !$0 { billPendingDelete = nil } }
+                ),
                 titleVisibility: .visible
             ) {
                 Button("Move to Recycle Bin (30 days)", role: .destructive) {
@@ -86,6 +89,8 @@ struct BillsView: View {
 
                     Task {
                         await softDeleteBill(homeId: homeId, billId: billId)
+
+                        // ✅ Force refresh so the bill disappears immediately
                         await reload()
                     }
                 }
@@ -113,11 +118,12 @@ struct BillsView: View {
 
     // MARK: - Reload
 
+    /// Reload bills and members.
+    /// NOTE: Dashboard balances do NOT auto-update unless DashboardView reloads, but this keeps BillsView correct.
     private func reload() async {
         guard let homeId = appState.activeHome?.id else { return }
 
-        // BillsViewModel.load should ideally only return active bills.
-        // If your current query loads everything, we can filter out deleted bills in the VM.
+        // BillsViewModel.load should return ACTIVE bills only.
         await vm.load(homeId: homeId)
 
         // Load members so we can show display names
@@ -154,6 +160,23 @@ struct BillsView: View {
         } catch {
             localError = error.localizedDescription
         }
+
+        let who = (user.name?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+            ? user.name!
+            : (user.email ?? user.uid)
+
+        let event = EventDoc(
+            id: nil,
+            type: "bill_deleted",
+            actorUid: user.uid,
+            actorName: who,
+            targetType: "bill",
+            targetId: billId,
+            message: "Deleted bill",
+            createdAt: Date()
+        )
+
+        _ = try? FirestoreService.eventsCol(homeId).addDocument(from: event)
     }
 
     // MARK: - Helpers

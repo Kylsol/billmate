@@ -15,6 +15,8 @@ struct DashboardView: View {
     @State private var shareItems: [Any] = []
 
     @State private var showCopiedAlert = false
+    
+    @State private var showRecycleBin = false
 
     var body: some View {
         NavigationStack {
@@ -51,6 +53,11 @@ struct DashboardView: View {
                 }
                 .sheet(isPresented: $showShareSheet) {
                     ShareSheet(items: shareItems)
+                }
+                .sheet(isPresented: $showRecycleBin) {
+                    RecycleBinView()
+                        .environmentObject(appState)
+                        .environmentObject(homesVM)
                 }
                 .alert("Copied", isPresented: $showCopiedAlert) {
                     Button("OK", role: .cancel) { }
@@ -128,20 +135,32 @@ struct DashboardView: View {
 
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
-                Button("Switch Home") { showHomePicker = true }
-
+                
+                
+                if appState.activeRole == .admin {
+                    Button("Home Settings") { showHomeSettings = true }
+                }
+                
                 if appState.activeRole == .admin {
                     Button("Create Invite Code") {
                         Task { await createInviteTapped() }
                     }
                 }
+                
+                Divider()
+                
+                Button {
+                    showRecycleBin = true
+                } label: {
+                    Label("Recycle Bin", systemImage: "trash")
+                }
+
+                Divider()
 
                 Button("Sign Out", role: .destructive) {
                     appState.signOut()
                 }
-                if appState.activeRole == .admin {
-                    Button("Home Settings") { showHomeSettings = true }
-                }
+                
             } label: {
                 Image(systemName: "ellipsis.circle")
             }
@@ -258,7 +277,7 @@ private struct HomePickerSheet: View {
             List(homes) { h in
                 Button(h.name) { onSelect(h) }
             }
-            .navigationTitle("Switch Home")
+//            .navigationTitle("Switch Home")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Close") { onClose() }

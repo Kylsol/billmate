@@ -96,23 +96,29 @@ struct HomeListView: View {
             // MARK: - Toolbar
 
             .toolbar {
-                // Recycle Bin button
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        showRecycleBin = true
-                    } label: {
-                        Label("Recycle Bin", systemImage: "trash")
-                    }
-                }
-
-                // Sign out
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Sign Out") {
-                        appState.signOut()
-                        // If signOut is async, use:
-                        // Task { await appState.signOut() }
+                    Menu {
+                        Button {
+                            showRecycleBin = true
+                        } label: {
+                            Label("Recycle Bin", systemImage: "trash")
+                        }
+
+                        Divider()
+
+                        Button(role: .destructive) {
+                            appState.signOut()
+                        } label: {
+                            Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
                     }
                 }
+            }
+            .sheet(isPresented: $showRecycleBin) {
+                RecycleBinView()
+                    .environmentObject(appState)
             }
 
             // MARK: - Confirmation: Soft Delete Home (Admin only)
