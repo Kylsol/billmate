@@ -91,6 +91,12 @@ struct HomeSettingsView: View {
             .task {
                 await reloadMembers()
             }
+            
+            .onChange(of: appState.activeRole) { _, newRole in
+                if newRole != .admin {
+                    dismiss()
+                }
+            }
 
             // Confirm remove member alert
             .alert("Remove Member?", isPresented: Binding(
@@ -207,8 +213,12 @@ struct HomeSettingsView: View {
         defer { isBusy = false }
 
         do {
-            try await homesVM.setMemberRole(homeId: homeId, memberUid: uid, role: role)
+            try await homesVM.setMemberRole(appState: appState, homeId: homeId, memberUid: uid, role: role)
             await reloadMembers()
+
+            if appState.activeRole != .admin {
+                dismiss()
+            }
         } catch {
             localError = error.localizedDescription
         }
@@ -227,7 +237,7 @@ struct HomeSettingsView: View {
         defer { isBusy = false }
 
         do {
-            try await homesVM.removeMember(homeId: homeId, memberUid: uid)
+            try await homesVM.removeMember(appState: appState, homeId: homeId, memberUid: uid)
             confirmRemoveUid = nil
             await reloadMembers()
         } catch {

@@ -1,3 +1,10 @@
+//
+//  DashboardViewModel.swift
+//  BillMate
+//
+//  Created by Kyle Solomons on 3/1/26.
+//
+
 import Combine
 import Foundation
 import FirebaseFirestore
@@ -15,23 +22,15 @@ final class DashboardViewModel: ObservableObject {
 
     // MARK: - Load Everything Needed For Dashboard
 
-    /// Loads members, bills, and payments for the active home, then recomputes balances.
-    ///
-    /// IMPORTANT:
-    /// - Bills and Payments support soft delete (Recycle Bin).
-    /// - Dashboard should NOT include deleted docs in totals, so we filter them out here.
-    /// - We filter client-side to avoid composite index requirements while you stabilize indexes.
     func loadAll(homeId: String) async {
         errorMessage = nil
         isBusy = true
         defer { isBusy = false }
 
         do {
-            // --- Members ---
             let membersSnap = try await FirestoreService.membersCol(homeId).getDocuments()
             self.members = try membersSnap.documents.map { try $0.data(as: MemberDoc.self) }
 
-            // --- Bills (load then filter out soft-deleted) ---
             let billsSnap = try await FirestoreService.billsCol(homeId)
                 .order(by: "date", descending: true)
                 .getDocuments()
@@ -39,7 +38,6 @@ final class DashboardViewModel: ObservableObject {
             let allBills = try billsSnap.documents.map { try $0.data(as: BillDoc.self) }
             self.bills = allBills.filter { ($0.isDeleted ?? false) == false }
 
-            // --- Payments (load then filter out soft-deleted) ---
             let paymentsSnap = try await FirestoreService.paymentsCol(homeId)
                 .order(by: "date", descending: true)
                 .getDocuments()
@@ -47,7 +45,6 @@ final class DashboardViewModel: ObservableObject {
             let allPayments = try paymentsSnap.documents.map { try $0.data(as: PaymentDoc.self) }
             self.payments = allPayments.filter { ($0.isDeleted ?? false) == false }
 
-            // --- Compute balances ---
             recompute()
 
         } catch {
@@ -57,7 +54,6 @@ final class DashboardViewModel: ObservableObject {
 
     // MARK: - Compute Balances
 
-    /// Recomputes member balances from the currently loaded ACTIVE bills/payments.
     func recompute() {
         self.balances = BalanceCalculator.compute(
             members: members,
@@ -65,4 +61,39 @@ final class DashboardViewModel: ObservableObject {
             payments: payments
         )
     }
+
+    // MARK: - Monthly Spending Chart
+
+    func monthlySpendingByCategory(for uid: String, referenceDate: Date = Date()) -> [CategorySpend] {
+        let calendar = Calendar.current
+
+        return bills
+            .filter { $0.paidByUid == uid }
+            .filter { calendar.isDate($0.date, equalTo: referenceDate, toGranularity: .month) }
+            .reduce(into: [String: Double]()) { partial, bill in
+                let category = normalizedCategory(bill.category)
+                partial[category, default: 0] += bill.amount
+            }
+            .map { CategorySpend(category: $0.key, amount: $0.value) }
+            .sorted { $0.amount > $1.amount }
+    }
+
+    func monthlyTotalSpent(for uid: String, referenceDate: Date = Date()) -> Double {
+        monthlySpendingByCategory(for: uid, referenceDate: referenceDate)
+            .reduce(0) { $0 + $1.amount }
+    }
+
+    private func normalizedCategory(_ value: String?) -> String {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "Other" : trimmed
+    }
+}
+
+// MARK: - Chart Model
+
+struct CategorySpend: Identifiable, Hashable {
+    let category: String
+    let amount: Double
+
+    var id: String { category }
 }

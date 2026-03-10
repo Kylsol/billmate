@@ -9,37 +9,37 @@ import FirebaseFirestore
 
 struct EventDoc: Codable, Identifiable {
 
-    // MARK: - Firestore Document ID
-
     @DocumentID var id: String?
 
     // MARK: - Action Metadata
 
-    /// What happened (examples: "bill_created", "bill_deleted", "payment_deleted", "home_deleted")
     var type: String
-
-    /// UID of the user who performed the action
     var actorUid: String
-
-    /// Display name of the user who performed the action (helps the UI avoid lookups)
-    /// Optional so older event docs decode safely.
     var actorName: String?
 
     // MARK: - Target Metadata
 
-    /// What was affected (examples: "home", "bill", "payment", "member")
     var targetType: String
-
-    /// Document ID of the affected target
     var targetId: String
 
     // MARK: - UI Message
 
-    /// Human-readable message for your feed UI
     var message: String
+
+    // MARK: - Update Detail Metadata
+
+    /// Example: "Category", "Amount", "Note", "Paid By", "Paid To", "Date"
+    var changedField: String?
+
+    /// Human-readable old value for the feed UI
+    var oldValue: String?
+
+    /// Human-readable new value for the feed UI
+    var newValue: String?
+    
+    var changeCount: Int?
 
     // MARK: - Timestamp
 
-    /// When the event occurred
     var createdAt: Date
 }

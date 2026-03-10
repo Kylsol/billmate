@@ -1,3 +1,10 @@
+//
+//  AddPaymentView.swift
+//  BillMate
+//
+//  Created by Kyle Solomons on 3/1/26.
+//
+
 import SwiftUI
 
 struct AddPaymentView: View {
@@ -18,7 +25,6 @@ struct AddPaymentView: View {
     var body: some View {
         NavigationStack {
             Form {
-
                 if appState.activeRole != .admin {
                     Section {
                         Text("Residents cannot add payments.")
@@ -26,21 +32,19 @@ struct AddPaymentView: View {
                     }
                 }
 
-                Section("Payment Details") {
+                Section("Payment") {
                     TextField("Amount", text: $amountText)
                         .keyboardType(.decimalPad)
 
                     TextField("Note", text: $note)
 
-                    DatePicker("Date",
-                               selection: $date,
-                               displayedComponents: .date)
+                    DatePicker("Date", selection: $date, displayedComponents: .date)
                 }
 
                 Section("Paid By") {
                     Picker("Member", selection: $paidByUid) {
                         ForEach(dashboardVM.members, id: \.uid) { member in
-                            Text(member.name ?? member.email ?? member.uid)
+                            Text(displayName(for: member))
                                 .tag(member.uid)
                         }
                     }
@@ -54,10 +58,14 @@ struct AddPaymentView: View {
                 Section("Paid To") {
                     Picker("Member", selection: $paidToUid) {
                         ForEach(dashboardVM.members, id: \.uid) { member in
-                            Text(member.name ?? member.email ?? member.uid)
+                            Text(displayName(for: member))
                                 .tag(member.uid)
                         }
                     }
+
+                    Text("Select who received the payment.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
 
                 if let error = paymentsVM.errorMessage {
@@ -145,5 +153,12 @@ struct AddPaymentView: View {
             onDone(true)
             dismiss()
         }
+    }
+
+    private func displayName(for member: MemberDoc) -> String {
+        let trimmedName = (member.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedName.isEmpty { return trimmedName }
+        if let email = member.email, !email.isEmpty { return email }
+        return member.uid
     }
 }

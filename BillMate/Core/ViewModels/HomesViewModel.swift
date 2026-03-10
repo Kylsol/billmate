@@ -187,16 +187,107 @@ final class HomesViewModel: ObservableObject {
         }
     }
 
-    func setMemberRole(homeId: String, memberUid: String, role: MemberRole) async throws {
-        try await FirestoreService.membersCol(homeId)
-            .document(memberUid)
-            .setData(["role": role.rawValue], merge: true)
+    func setMemberRole(appState: AppState, homeId: String, memberUid: String, role: MemberRole) async throws {
+        guard let currentUser = appState.authUser else {
+            throw NSError(domain: "BillMate", code: 401,
+                          userInfo: [NSLocalizedDescriptionKey: "Not signed in."])
+        }
+
+        let membersRef = FirestoreService.membersCol(homeId)
+        let currentUserRef = membersRef.document(currentUser.uid)
+        let targetRef = membersRef.document(memberUid)
+
+        // Verify current user is still admin
+        let currentSnap = try await currentUserRef.getDocument()
+        guard let currentData = currentSnap.data() else {
+            throw NSError(domain: "BillMate", code: 404,
+                          userInfo: [NSLocalizedDescriptionKey: "Your membership was not found."])
+        }
+
+        let currentRole = MemberRole(rawValue: currentData["role"] as? String ?? "resident") ?? .resident
+        guard currentRole == .admin else {
+            throw NSError(domain: "BillMate", code: 403,
+                          userInfo: [NSLocalizedDescriptionKey: "You no longer have admin privileges."])
+        }
+
+        // Load target member
+        let targetSnap = try await targetRef.getDocument()
+        guard let targetData = targetSnap.data() else {
+            throw NSError(domain: "BillMate", code: 404,
+                          userInfo: [NSLocalizedDescriptionKey: "Target member was not found."])
+        }
+
+        let targetCurrentRole = MemberRole(rawValue: targetData["role"] as? String ?? "resident") ?? .resident
+
+        // Prevent removing the last admin
+        if targetCurrentRole == .admin && role != .admin {
+            let allMembersSnap = try await membersRef.getDocuments()
+            let adminCount = allMembersSnap.documents.filter {
+                let raw = $0.data()["role"] as? String ?? "resident"
+                return raw == MemberRole.admin.rawValue
+            }.count
+
+            if adminCount <= 1 {
+                throw NSError(domain: "BillMate", code: 400,
+                              userInfo: [NSLocalizedDescriptionKey: "This home must always have at least one admin."])
+            }
+        }
+
+        try await targetRef.setData(["role": role.rawValue], merge: true)
+
+        // Refresh local app role immediately if I changed myself
+        if currentUser.uid == memberUid {
+            await refreshMyRole(appState: appState, homeId: homeId)
+        }
     }
 
-    func removeMember(homeId: String, memberUid: String) async throws {
-        try await FirestoreService.membersCol(homeId)
-            .document(memberUid)
-            .delete()
+    func removeMember(appState: AppState, homeId: String, memberUid: String) async throws {
+        guard let currentUser = appState.authUser else {
+            throw NSError(domain: "BillMate", code: 401,
+                          userInfo: [NSLocalizedDescriptionKey: "Not signed in."])
+        }
+
+        let membersRef = FirestoreService.membersCol(homeId)
+        let currentUserRef = membersRef.document(currentUser.uid)
+        let targetRef = membersRef.document(memberUid)
+
+        // Verify current user is still admin
+        let currentSnap = try await currentUserRef.getDocument()
+        guard let currentData = currentSnap.data() else {
+            throw NSError(domain: "BillMate", code: 404,
+                          userInfo: [NSLocalizedDescriptionKey: "Your membership was not found."])
+        }
+
+        let currentRole = MemberRole(rawValue: currentData["role"] as? String ?? "resident") ?? .resident
+        guard currentRole == .admin else {
+            throw NSError(domain: "BillMate", code: 403,
+                          userInfo: [NSLocalizedDescriptionKey: "You no longer have admin privileges."])
+        }
+
+        // Load target member
+        let targetSnap = try await targetRef.getDocument()
+        guard let targetData = targetSnap.data() else {
+            throw NSError(domain: "BillMate", code: 404,
+                          userInfo: [NSLocalizedDescriptionKey: "Target member was not found."])
+        }
+
+        let targetRole = MemberRole(rawValue: targetData["role"] as? String ?? "resident") ?? .resident
+
+        // Prevent removing the last admin
+        if targetRole == .admin {
+            let allMembersSnap = try await membersRef.getDocuments()
+            let adminCount = allMembersSnap.documents.filter {
+                let raw = $0.data()["role"] as? String ?? "resident"
+                return raw == MemberRole.admin.rawValue
+            }.count
+
+            if adminCount <= 1 {
+                throw NSError(domain: "BillMate", code: 400,
+                              userInfo: [NSLocalizedDescriptionKey: "This home must always have at least one admin."])
+            }
+        }
+
+        try await targetRef.delete()
     }
 
 
@@ -563,6 +654,35 @@ final class HomesViewModel: ObservableObject {
         if let ms = value as? Double { return Date(timeIntervalSince1970: ms / 1000.0) }
         if let ms = value as? Int { return Date(timeIntervalSince1970: Double(ms) / 1000.0) }
         return nil
+    }
+    
+    func refreshMyRole(appState: AppState, homeId: String) async {
+        guard let user = appState.authUser else { return }
+
+        do {
+            let memberSnap = try await FirestoreService
+                .membersCol(homeId)
+                .document(user.uid)
+                .getDocument()
+
+            guard let data = memberSnap.data() else {
+                // User is no longer a member
+                if appState.activeHome?.id == homeId {
+                    appState.activeHome = nil
+                    appState.activeRole = .resident
+                }
+                return
+            }
+
+            let roleStr = data["role"] as? String ?? "resident"
+            let newRole = Role(rawValue: roleStr) ?? .resident
+
+            if appState.activeHome?.id == homeId {
+                appState.activeRole = newRole
+            }
+        } catch {
+            self.errorMessage = error.localizedDescription
+        }
     }
 }
 

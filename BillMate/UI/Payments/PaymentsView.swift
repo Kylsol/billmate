@@ -1,3 +1,10 @@
+//
+//  PaymentsView.swift
+//  BillMate
+//
+//  Created by Kyle Solomons on 3/1/26.
+//
+
 import SwiftUI
 import FirebaseFirestore
 
@@ -13,7 +20,7 @@ struct PaymentsView: View {
     /// Payment pending delete confirmation.
     @State private var paymentPendingDelete: PaymentDoc?
 
-    /// Local error for delete action (vm.errorMessage still shows too).
+    /// Local error for delete action.
     @State private var localError: String?
 
     var body: some View {
@@ -21,36 +28,43 @@ struct PaymentsView: View {
             List {
                 // MARK: - Errors
                 if let err = localError ?? vm.errorMessage {
-                    Text(err).foregroundStyle(.red)
+                    Text(err)
+                        .foregroundStyle(.red)
                 }
 
                 // MARK: - Payments
-                ForEach(vm.payments) { p in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(p.note.isEmpty ? "Payment" : p.note)
-                            .font(.headline)
+                ForEach(vm.payments) { payment in
+                    NavigationLink {
+                        PaymentDetailView(
+                            payment: payment,
+                            isRecycleBinItem: false,
+                            onChanged: {
+                                Task { await reload() }
+                            }
+                        )
+                    } label: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(payment.note.isEmpty ? "Payment" : payment.note)
+                                .font(.headline)
 
-                        HStack {
-                            Text(p.amount, format: .currency(code: currencyCode()))
-                                .monospacedDigit()
-                            Spacer()
-                            Text(p.date, style: .date)
+                            HStack {
+                                Text(payment.amount, format: .currency(code: currencyCode()))
+                                    .monospacedDigit()
+                                Spacer()
+                                Text(payment.date, style: .date)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            paymentWhoLine(payment)
+                                .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
-
-                        paymentWhoLine(p)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                        .padding(.vertical, 4)
                     }
-                    .padding(.vertical, 4)
-
-                    // MARK: - Swipe to Soft Delete (Admin only)
-                    // NOTE:
-                    // This assumes your Payment docs support isDeleted/deletedAt/etc.
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         if appState.activeRole == .admin {
                             Button(role: .destructive) {
-                                paymentPendingDelete = p
+                                paymentPendingDelete = payment
                             } label: {
                                 Label("Delete", systemImage: "trash")
                             }
@@ -59,10 +73,7 @@ struct PaymentsView: View {
                 }
             }
             .navigationTitle("Payments")
-
-            // MARK: - Toolbar
             .toolbar {
-                // Add payment (Admin only)
                 if appState.activeRole == .admin {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { showAdd = true } label: {
@@ -71,8 +82,6 @@ struct PaymentsView: View {
                     }
                 }
             }
-
-            // MARK: - Confirm Soft Delete
             .confirmationDialog(
                 "Delete Payment?",
                 isPresented: Binding(
@@ -82,16 +91,14 @@ struct PaymentsView: View {
                 titleVisibility: .visible
             ) {
                 Button("Move to Recycle Bin (30 days)", role: .destructive) {
-                    guard let p = paymentPendingDelete,
-                          let paymentId = p.id,
+                    guard let payment = paymentPendingDelete,
+                          let paymentId = payment.id,
                           let homeId = appState.activeHome?.id else { return }
 
                     paymentPendingDelete = nil
 
                     Task {
                         await softDeletePayment(homeId: homeId, paymentId: paymentId)
-
-                        // ✅ Force refresh so the payment disappears immediately
                         await reload()
                     }
                 }
@@ -100,8 +107,6 @@ struct PaymentsView: View {
             } message: {
                 Text("This payment will be recoverable for 30 days. It will expire automatically after that.")
             }
-
-            // MARK: - Add Payment Sheet
             .sheet(isPresented: $showAdd) {
                 AddPaymentView { didAdd in
                     if didAdd {
@@ -109,8 +114,6 @@ struct PaymentsView: View {
                     }
                 }
             }
-
-            // MARK: - Initial Load
             .task {
                 await reload()
             }
@@ -122,15 +125,11 @@ struct PaymentsView: View {
     private func reload() async {
         guard let homeId = appState.activeHome?.id else { return }
         await vm.load(homeId: homeId)
-
-        // ✅ load members so we can show names
         await dashVM.loadAll(homeId: homeId)
     }
 
-    // MARK: - Soft Delete Payment (Firestore update)
+    // MARK: - Soft Delete Payment
 
-    /// Soft deletes a payment by marking it deleted and setting an expiration date.
-    /// IMPORTANT: This requires your Payment docs to have the soft-delete fields.
     private func softDeletePayment(homeId: String, paymentId: String) async {
         localError = nil
 
@@ -144,7 +143,6 @@ struct PaymentsView: View {
             ?? now.addingTimeInterval(30 * 24 * 3600)
 
         do {
-            // 1) Soft delete the payment
             try await FirestoreService.paymentsCol(homeId)
                 .document(paymentId)
                 .setData([
@@ -155,7 +153,6 @@ struct PaymentsView: View {
                     "deletedByName": user.name as Any
                 ], merge: true)
 
-            // 2) Log event to feed (Deleted by...)
             let who = (user.name?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
                 ? user.name!
                 : (user.email ?? user.uid)
@@ -180,23 +177,22 @@ struct PaymentsView: View {
 
     // MARK: - Helpers
 
-    private func paymentWhoLine(_ p: PaymentDoc) -> Text {
-        let from = displayName(for: p.paidByUid, members: dashVM.members)
+    private func paymentWhoLine(_ payment: PaymentDoc) -> Text {
+        let from = displayName(for: payment.paidByUid, members: dashVM.members)
 
-        if let toUid = p.paidToUid, !toUid.isEmpty {
+        if let toUid = payment.paidToUid, !toUid.isEmpty {
             let to = displayName(for: toUid, members: dashVM.members)
             return Text("\(from) → \(to)")
         } else {
-            // Backward compatible with old Payment docs
             return Text("Paid by: \(from)")
         }
     }
 
     private func displayName(for uid: String, members: [MemberDoc]) -> String {
-        if let m = members.first(where: { $0.uid == uid }) {
-            let trimmed = (m.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if let member = members.first(where: { $0.uid == uid }) {
+            let trimmed = (member.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty { return trimmed }
-            if let email = m.email, !email.isEmpty { return email }
+            if let email = member.email, !email.isEmpty { return email }
         }
         return uid
     }

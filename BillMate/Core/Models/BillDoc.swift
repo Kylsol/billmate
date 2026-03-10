@@ -1,16 +1,23 @@
+//
+//  BillDoc.swift
+//  BillMate
+//
+//  Created by Kyle Solomons on 3/1/26.
+//
+
 import Foundation
 import FirebaseFirestore
 
 /// Firestore model for homes/{homeId}/bills/{billId}
 struct BillDoc: Codable, Identifiable {
 
-    // Firestore document id
     @DocumentID var id: String?
 
     // Core bill fields
     var description: String
     var amount: Double
     var date: Date
+    var category: String?
 
     var paidByUid: String
     var participantUids: [String]
@@ -23,7 +30,6 @@ struct BillDoc: Codable, Identifiable {
     var updatedByUid: String?
 
     // Soft delete / recycle bin fields
-    // Optional so older docs decode safely
     var isDeleted: Bool?
     var deletedAt: Date?
     var deleteExpiresAt: Date?

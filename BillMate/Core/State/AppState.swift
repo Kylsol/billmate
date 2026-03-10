@@ -1,3 +1,10 @@
+//
+//  AppState.swift
+//  BillMate
+//
+//  Firestore model for homes/{homeId}/events/{eventId}
+//  Used for audit logs and activity tracking.
+
 import Combine
 import Foundation
 import FirebaseAuth

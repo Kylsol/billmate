@@ -15,27 +15,27 @@ import FirebaseFirestore
 struct RecycleBinView: View {
     @EnvironmentObject private var appState: AppState
 
-    // Reuse your existing VM because it already has:
-    // - loadDeletedHomes(for:)
-    // - restoreHome(appState:homeId:)
     @StateObject private var homesVM = HomesViewModel()
+    @StateObject private var dashVM = DashboardViewModel()
 
     // MARK: - UI State
 
     @State private var tab: BinTab = .homes
     @State private var deletedHomes: [HomeDoc] = []
     @State private var deletedBills: [DeletedBillRow] = []
+    @State private var deletedPayments: [DeletedPaymentRow] = []
+    @State private var memberNames: [String: String] = [:]
 
     @State private var isLoading: Bool = false
     @State private var localError: String?
 
     // Confirmation dialogs
     @State private var homePendingRestore: HomeDoc?
-    @State private var billPendingRestore: DeletedBillRow?
 
     enum BinTab: String, CaseIterable, Identifiable {
         case homes = "Homes"
         case bills = "Bills"
+        case payments = "Payments"
 
         var id: String { rawValue }
     }
@@ -43,8 +43,6 @@ struct RecycleBinView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 12) {
-
-                // MARK: - Segmented Tabs
                 Picker("Recycle Bin", selection: $tab) {
                     ForEach(BinTab.allCases) { t in
                         Text(t.rawValue).tag(t)
@@ -53,7 +51,6 @@ struct RecycleBinView: View {
                 .pickerStyle(.segmented)
                 .padding(.horizontal)
 
-                // MARK: - Errors
                 if let err = localError ?? homesVM.errorMessage {
                     Text(err)
                         .foregroundStyle(.red)
@@ -61,30 +58,31 @@ struct RecycleBinView: View {
                         .padding(.horizontal)
                 }
 
-                // MARK: - Content
                 Group {
                     switch tab {
                     case .homes:
                         homesList
                     case .bills:
                         billsList
+                    case .payments:
+                        paymentsList
                     }
                 }
             }
             .navigationTitle("Recycle Bin")
             .toolbar {
-                // Manual refresh
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        Task { await refresh() }
+                        Task {
+                            await loadMembers()
+                            await refresh()
+                        }
                     } label: {
                         Image(systemName: "arrow.clockwise")
                     }
                     .disabled(isLoading)
                 }
             }
-
-            // MARK: - Restore Confirmation (Home)
             .confirmationDialog(
                 "Restore Home?",
                 isPresented: .constant(homePendingRestore != nil),
@@ -103,35 +101,14 @@ struct RecycleBinView: View {
             } message: {
                 Text("This home will be moved back to your active homes list.")
             }
-
-            // MARK: - Restore Confirmation (Bill)
-            .confirmationDialog(
-                "Restore Bill?",
-                isPresented: .constant(billPendingRestore != nil),
-                titleVisibility: .visible
-            ) {
-                Button("Restore") {
-                    guard let bill = billPendingRestore else { return }
-                    billPendingRestore = nil
-
-                    Task {
-                        await restoreBill(bill)
-                        await refreshBillsOnly()
-                    }
-                }
-                Button("Cancel", role: .cancel) { billPendingRestore = nil }
-            } message: {
-                Text("This bill will be restored to the active bills list.")
-            }
-
-            // MARK: - Initial Load
             .task {
+                await loadMembers()
                 await refresh()
             }
         }
     }
 
-    // MARK: - Homes List (Deleted)
+    // MARK: - Homes List
 
     private var homesList: some View {
         List {
@@ -182,12 +159,10 @@ struct RecycleBinView: View {
         .listStyle(.insetGrouped)
     }
 
-    // MARK: - Bills List (Deleted)
+    // MARK: - Bills List
 
     private var billsList: some View {
         List {
-            // If no active home is selected, bills are ambiguous.
-            // Bills belong to a specific home, so we use the currently selected home.
             if appState.activeHome?.id == nil {
                 Section {
                     Text("Select a home first to view deleted bills.")
@@ -212,37 +187,35 @@ struct RecycleBinView: View {
                 } else {
                     Section("Deleted Bills") {
                         ForEach(deletedBills) { bill in
-                            VStack(alignment: .leading, spacing: 6) {
-                                HStack {
+                            NavigationLink {
+                                BillDetailView(
+                                    bill: bill.toBillDoc(),
+                                    isRecycleBinItem: true,
+                                    onChanged: {
+                                        Task { await refresh() }
+                                    },
+                                    onRestore: { restoredBill in
+                                        await restoreBill(restoredBill)
+                                    }
+                                )
+                            } label: {
+                                VStack(alignment: .leading, spacing: 6) {
                                     Text(bill.description)
                                         .font(.headline)
-                                    Spacer()
-                                    Text(bill.amountString)
-                                        .font(.subheadline)
+
+                                    HStack {
+                                        Text(bill.amountString)
+                                            .monospacedDigit()
+                                        Spacer()
+                                        Text(bill.dateString)
+                                            .foregroundStyle(.secondary)
+                                    }
+
+                                    Text(deletedByText(name: bill.deletedByName, uid: bill.deletedByUid))
+                                        .font(.footnote)
                                         .foregroundStyle(.secondary)
                                 }
-
-                                Text(bill.dateString)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-
-                                Text(deletedByText(name: bill.deletedByName, uid: bill.deletedByUid))
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-
-                                Text(expiresText(expiresAt: bill.deleteExpiresAt))
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .contentShape(Rectangle())
-                            .onTapGesture { billPendingRestore = bill }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button {
-                                    billPendingRestore = bill
-                                } label: {
-                                    Label("Restore", systemImage: "arrow.uturn.backward")
-                                }
-                                .tint(.green)
+                                .padding(.vertical, 4)
                             }
                         }
                     }
@@ -251,14 +224,87 @@ struct RecycleBinView: View {
         }
         .listStyle(.insetGrouped)
         .onChange(of: appState.activeHome?.id) { _, _ in
-            // If the user switches homes while this sheet is open, refresh bills for the new home.
-            Task { await refreshBillsOnly() }
+            Task {
+                await loadMembers()
+                await refreshBillsOnly()
+            }
+        }
+    }
+
+    // MARK: - Payments List
+
+    private var paymentsList: some View {
+        List {
+            if appState.activeHome?.id == nil {
+                Section {
+                    Text("Select a home first to view deleted payments.")
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                if isLoading {
+                    Section {
+                        HStack {
+                            ProgressView()
+                            Text("Loading...")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                if deletedPayments.isEmpty && !isLoading {
+                    Section {
+                        Text("No deleted payments in this home.")
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Section("Deleted Payments") {
+                        ForEach(deletedPayments) { payment in
+                            NavigationLink {
+                                PaymentDetailView(
+                                    payment: payment.toPaymentDoc(),
+                                    isRecycleBinItem: true,
+                                    onChanged: {
+                                        Task { await refresh() }
+                                    },
+                                    onRestore: { restoredPayment in
+                                        await restorePayment(restoredPayment)
+                                    }
+                                )
+                            } label: {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(payment.note)
+                                        .font(.headline)
+
+                                    HStack {
+                                        Text(payment.amountString)
+                                            .monospacedDigit()
+                                        Spacer()
+                                        Text(payment.dateString)
+                                            .foregroundStyle(.secondary)
+                                    }
+
+                                    Text(deletedByText(name: payment.deletedByName, uid: payment.deletedByUid))
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.vertical, 4)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .onChange(of: appState.activeHome?.id) { _, _ in
+            Task {
+                await loadMembers()
+                await refreshPaymentsOnly()
+            }
         }
     }
 
     // MARK: - Refresh
 
-    /// Refresh both tabs (deleted homes + deleted bills for active home).
     private func refresh() async {
         localError = nil
         guard let uid = appState.authUser?.uid else {
@@ -269,14 +315,11 @@ struct RecycleBinView: View {
         isLoading = true
         defer { isLoading = false }
 
-        // Deleted homes (across all homes the user belongs to)
         deletedHomes = await homesVM.loadDeletedHomes(for: uid)
-
-        // Deleted bills (only for currently selected home)
         await refreshBillsOnly()
+        await refreshPaymentsOnly()
     }
 
-    /// Refresh only the deleted bills list for the currently selected home.
     private func refreshBillsOnly() async {
         localError = nil
 
@@ -293,13 +336,20 @@ struct RecycleBinView: View {
             deletedBills = snap.documents.compactMap { doc in
                 let data = doc.data()
 
-                // Pull fields safely (handles your mixed Timestamp/ms encoding)
                 let description = data["description"] as? String ?? "Bill"
-                let amount = data["amount"] as? Double ?? 0.0
+                let amount = doubleFromAny(data["amount"]) ?? 0.0
                 let date = dateFromAny(data["date"]) ?? Date()
+                let category = data["category"] as? String
+                let paidByUid = data["paidByUid"] as? String ?? ""
+                let participantUids = data["participantUids"] as? [String] ?? []
+                let createdAt = dateFromAny(data["createdAt"]) ?? date
+                let createdByUid = data["createdByUid"] as? String ?? ""
+                let updatedAt = dateFromAny(data["updatedAt"])
+                let updatedByUid = data["updatedByUid"] as? String
 
                 let deletedByUid = data["deletedByUid"] as? String
                 let deletedByName = data["deletedByName"] as? String
+                let deletedAt = dateFromAny(data["deletedAt"])
                 let deleteExpiresAt = dateFromAny(data["deleteExpiresAt"])
 
                 return DeletedBillRow(
@@ -307,8 +357,16 @@ struct RecycleBinView: View {
                     description: description,
                     amount: amount,
                     date: date,
+                    category: category,
+                    paidByUid: paidByUid,
+                    participantUids: participantUids,
+                    createdAt: createdAt,
+                    createdByUid: createdByUid,
+                    updatedAt: updatedAt,
+                    updatedByUid: updatedByUid,
                     deletedByUid: deletedByUid,
                     deletedByName: deletedByName,
+                    deletedAt: deletedAt,
                     deleteExpiresAt: deleteExpiresAt
                 )
             }
@@ -320,15 +378,95 @@ struct RecycleBinView: View {
         }
     }
 
-    // MARK: - Restore Bill
+    private func refreshPaymentsOnly() async {
+        localError = nil
 
-    /// Restores a bill by clearing soft-delete fields.
-    private func restoreBill(_ bill: DeletedBillRow) async {
-        guard let homeId = appState.activeHome?.id else { return }
+        guard let homeId = appState.activeHome?.id else {
+            deletedPayments = []
+            return
+        }
+
+        do {
+            let snap = try await FirestoreService.paymentsCol(homeId)
+                .whereField("isDeleted", isEqualTo: true)
+                .getDocuments()
+
+            deletedPayments = snap.documents.compactMap { doc in
+                let data = doc.data()
+
+                let amount = doubleFromAny(data["amount"]) ?? 0.0
+                let date = dateFromAny(data["date"]) ?? Date()
+                let rawNote = (data["note"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let note = (rawNote?.isEmpty == false) ? rawNote! : "Payment"
+
+                let paidByUid = data["paidByUid"] as? String ?? ""
+                let paidToUid = data["paidToUid"] as? String
+                let createdAt = dateFromAny(data["createdAt"]) ?? date
+                let createdByUid = data["createdByUid"] as? String ?? ""
+                let updatedAt = dateFromAny(data["updatedAt"])
+                let updatedByUid = data["updatedByUid"] as? String
+
+                let deletedByUid = data["deletedByUid"] as? String
+                let deletedByName = data["deletedByName"] as? String
+                let deletedAt = dateFromAny(data["deletedAt"])
+                let deleteExpiresAt = dateFromAny(data["deleteExpiresAt"])
+
+                return DeletedPaymentRow(
+                    id: doc.documentID,
+                    amount: amount,
+                    date: date,
+                    note: note,
+                    paidByUid: paidByUid,
+                    paidToUid: paidToUid,
+                    createdAt: createdAt,
+                    createdByUid: createdByUid,
+                    updatedAt: updatedAt,
+                    updatedByUid: updatedByUid,
+                    deletedByUid: deletedByUid,
+                    deletedByName: deletedByName,
+                    deletedAt: deletedAt,
+                    deleteExpiresAt: deleteExpiresAt
+                )
+            }
+            .sorted { $0.date > $1.date }
+
+        } catch {
+            localError = error.localizedDescription
+            deletedPayments = []
+        }
+    }
+
+    // MARK: - Members
+
+    private func loadMembers() async {
+        guard let homeId = appState.activeHome?.id else {
+            memberNames = [:]
+            return
+        }
+
+        await dashVM.loadAll(homeId: homeId)
+
+        var map: [String: String] = [:]
+        for member in dashVM.members {
+            let trimmedName = (member.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedName.isEmpty {
+                map[member.uid] = trimmedName
+            } else if let email = member.email, !email.isEmpty {
+                map[member.uid] = email
+            }
+        }
+        memberNames = map
+    }
+
+    // MARK: - Restore
+
+    private func restoreBill(_ bill: BillDoc) async {
+        guard let homeId = appState.activeHome?.id,
+              let billId = bill.id else { return }
 
         do {
             try await FirestoreService.billsCol(homeId)
-                .document(bill.id)
+                .document(billId)
                 .updateData([
                     "isDeleted": false,
                     "deletedAt": FieldValue.delete(),
@@ -341,17 +479,36 @@ struct RecycleBinView: View {
         }
     }
 
-    // MARK: - Text Helpers
+    private func restorePayment(_ payment: PaymentDoc) async {
+        guard let homeId = appState.activeHome?.id,
+              let paymentId = payment.id else { return }
+
+        do {
+            try await FirestoreService.paymentsCol(homeId)
+                .document(paymentId)
+                .updateData([
+                    "isDeleted": false,
+                    "deletedAt": FieldValue.delete(),
+                    "deleteExpiresAt": FieldValue.delete(),
+                    "deletedByUid": FieldValue.delete(),
+                    "deletedByName": FieldValue.delete()
+                ])
+        } catch {
+            localError = error.localizedDescription
+        }
+    }
+
+    // MARK: - Helpers
 
     private func deletedByText(name: String?, uid: String?) -> String {
         let trimmedName = name?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let trimmedName, !trimmedName.isEmpty {
-            return "Deleted by \(trimmedName)"
+            return "Deleted by: \(trimmedName)"
         }
         if let uid, !uid.isEmpty {
-            return "Deleted by \(uid)"
+            return "Deleted by: \(memberNames[uid] ?? uid)"
         }
-        return "Deleted by unknown"
+        return "Deleted by: unknown"
     }
 
     private func expiresText(expiresAt: Date?) -> String {
@@ -367,33 +524,46 @@ struct RecycleBinView: View {
         return "Expires in \(days) days"
     }
 
-    // MARK: - Date Helper (matches your ViewModel’s behavior)
-
-    /// Handles Firestore Timestamp OR millisecond numeric dates.
     private func dateFromAny(_ value: Any?) -> Date? {
         if let ts = value as? Timestamp { return ts.dateValue() }
         if let ms = value as? Double { return Date(timeIntervalSince1970: ms / 1000.0) }
         if let ms = value as? Int { return Date(timeIntervalSince1970: Double(ms) / 1000.0) }
+        if let ms = value as? Int64 { return Date(timeIntervalSince1970: Double(ms) / 1000.0) }
+        return nil
+    }
+
+    private func doubleFromAny(_ value: Any?) -> Double? {
+        if let d = value as? Double { return d }
+        if let i = value as? Int { return Double(i) }
+        if let i64 = value as? Int64 { return Double(i64) }
+        if let n = value as? NSNumber { return n.doubleValue }
         return nil
     }
 }
 
-// MARK: - Lightweight UI Model (Deleted Bill Row)
+// MARK: - Deleted Bill Row
 
-/// A small view-only model for the recycle bin bills list.
-/// We do this instead of decoding BillDoc directly to avoid issues with mixed date formats.
 private struct DeletedBillRow: Identifiable, Hashable {
     let id: String
     let description: String
     let amount: Double
     let date: Date
+    let category: String?
+
+    let paidByUid: String
+    let participantUids: [String]
+
+    let createdAt: Date
+    let createdByUid: String
+    let updatedAt: Date?
+    let updatedByUid: String?
 
     let deletedByUid: String?
     let deletedByName: String?
+    let deletedAt: Date?
     let deleteExpiresAt: Date?
 
     var amountString: String {
-        // Simple formatting (you can swap in NumberFormatter later)
         String(format: "$%.2f", amount)
     }
 
@@ -402,5 +572,79 @@ private struct DeletedBillRow: Identifiable, Hashable {
         formatter.dateStyle = .medium
         formatter.timeStyle = .none
         return formatter.string(from: date)
+    }
+
+    func toBillDoc() -> BillDoc {
+        BillDoc(
+            id: id,
+            description: description,
+            amount: amount,
+            date: date,
+            category: category,
+            paidByUid: paidByUid,
+            participantUids: participantUids,
+            createdAt: createdAt,
+            createdByUid: createdByUid,
+            updatedAt: updatedAt,
+            updatedByUid: updatedByUid,
+            isDeleted: true,
+            deletedAt: deletedAt,
+            deleteExpiresAt: deleteExpiresAt,
+            deletedByUid: deletedByUid,
+            deletedByName: deletedByName
+        )
+    }
+}
+
+// MARK: - Deleted Payment Row
+
+private struct DeletedPaymentRow: Identifiable, Hashable {
+    let id: String
+    let amount: Double
+    let date: Date
+    let note: String
+
+    let paidByUid: String
+    let paidToUid: String?
+
+    let createdAt: Date
+    let createdByUid: String
+    let updatedAt: Date?
+    let updatedByUid: String?
+
+    let deletedByUid: String?
+    let deletedByName: String?
+    let deletedAt: Date?
+    let deleteExpiresAt: Date?
+
+    var amountString: String {
+        String(format: "$%.2f", amount)
+    }
+
+    var dateString: String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter.string(from: date)
+    }
+
+    func toPaymentDoc() -> PaymentDoc {
+        PaymentDoc(
+            id: id,
+            amount: amount,
+            date: date,
+            note: note,
+            paidByUid: paidByUid,
+            paidToUid: paidToUid,
+            createdAt: createdAt,
+            createdByUid: createdByUid,
+            updatedAt: updatedAt,
+            updatedByUid: updatedByUid,
+            isDeleted: true,
+            deletedAt: deletedAt,
+            deleteExpiresAt: deleteExpiresAt,
+            deletedByUid: deletedByUid,
+            deletedByName: deletedByName
+        )
     }
 }

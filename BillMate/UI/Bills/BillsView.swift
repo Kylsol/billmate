@@ -1,3 +1,10 @@
+//
+//  BillsView.swift
+//  BillMate
+//
+//  Created by Kyle Solomons on 3/1/26.
+//
+
 import SwiftUI
 import FirebaseFirestore
 
@@ -13,7 +20,7 @@ struct BillsView: View {
     /// Holds the bill the user is about to delete (used for confirmation dialog).
     @State private var billPendingDelete: BillDoc?
 
-    /// Local error display for delete/restore actions (optional; vm.errorMessage still shows too).
+    /// Local error display for delete/restore actions.
     @State private var localError: String?
 
     var body: some View {
@@ -21,31 +28,39 @@ struct BillsView: View {
             List {
                 // MARK: - Errors
                 if let err = localError ?? vm.errorMessage {
-                    Text(err).foregroundStyle(.red)
+                    Text(err)
+                        .foregroundStyle(.red)
                 }
 
                 // MARK: - Bills
                 ForEach(vm.bills) { bill in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(bill.description)
-                            .font(.headline)
+                    NavigationLink {
+                        BillDetailView(
+                            bill: bill,
+                            isRecycleBinItem: false,
+                            onChanged: {
+                                Task { await reload() }
+                            }
+                        )
+                    } label: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(bill.description)
+                                .font(.headline)
 
-                        HStack {
-                            Text(bill.amount, format: .currency(code: currencyCode()))
-                                .monospacedDigit()
-                            Spacer()
-                            Text(bill.date, style: .date)
+                            HStack {
+                                Text(bill.amount, format: .currency(code: currencyCode()))
+                                    .monospacedDigit()
+                                Spacer()
+                                Text(bill.date, style: .date)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Text("Paid by: \(displayName(for: bill.paidByUid, members: dashVM.members))")
+                                .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
-
-                        Text("Paid by: \(displayName(for: bill.paidByUid, members: dashVM.members))")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                        .padding(.vertical, 4)
                     }
-                    .padding(.vertical, 4)
-
-                    // MARK: - Swipe to Soft Delete (Admin only)
-                    // This doesn't permanently delete the doc — it moves it to the recycle bin for 30 days.
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         if appState.activeRole == .admin {
                             Button(role: .destructive) {
@@ -58,10 +73,7 @@ struct BillsView: View {
                 }
             }
             .navigationTitle("Bills")
-
-            // MARK: - Toolbar
             .toolbar {
-                // Add bill (Admin only)
                 if appState.activeRole == .admin {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { showAdd = true } label: {
@@ -70,8 +82,6 @@ struct BillsView: View {
                     }
                 }
             }
-
-            // MARK: - Confirm Soft Delete
             .confirmationDialog(
                 "Delete Bill?",
                 isPresented: Binding(
@@ -89,8 +99,6 @@ struct BillsView: View {
 
                     Task {
                         await softDeleteBill(homeId: homeId, billId: billId)
-
-                        // ✅ Force refresh so the bill disappears immediately
                         await reload()
                     }
                 }
@@ -99,8 +107,6 @@ struct BillsView: View {
             } message: {
                 Text("This bill will be recoverable for 30 days. It will expire automatically after that.")
             }
-
-            // MARK: - Add Bill Sheet
             .sheet(isPresented: $showAdd) {
                 AddBillView { didAdd in
                     if didAdd {
@@ -108,8 +114,6 @@ struct BillsView: View {
                     }
                 }
             }
-
-            // MARK: - Initial Load
             .task {
                 await reload()
             }
@@ -118,22 +122,15 @@ struct BillsView: View {
 
     // MARK: - Reload
 
-    /// Reload bills and members.
-    /// NOTE: Dashboard balances do NOT auto-update unless DashboardView reloads, but this keeps BillsView correct.
     private func reload() async {
         guard let homeId = appState.activeHome?.id else { return }
 
-        // BillsViewModel.load should return ACTIVE bills only.
         await vm.load(homeId: homeId)
-
-        // Load members so we can show display names
         await dashVM.loadAll(homeId: homeId)
     }
 
-    // MARK: - Soft Delete Bill (Firestore update)
+    // MARK: - Soft Delete Bill
 
-    /// Soft deletes a bill by marking it deleted and setting an expiration date.
-    /// NOTE: This does NOT permanently delete the doc.
     private func softDeleteBill(homeId: String, billId: String) async {
         localError = nil
 
