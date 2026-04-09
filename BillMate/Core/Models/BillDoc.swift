@@ -20,7 +20,16 @@ struct BillDoc: Codable, Identifiable {
     var category: String?
 
     var paidByUid: String
+
+    /// Legacy equal-split support
     var participantUids: [String]
+
+    /// New split system
+    /// "equal" or "custom"
+    var splitMode: String?
+
+    /// Participants for equal/custom split, including guests
+    var splitEntries: [BillSplitEntry]?
 
     var createdAt: Date
     var createdByUid: String

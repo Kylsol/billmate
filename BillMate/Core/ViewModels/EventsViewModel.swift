@@ -89,10 +89,6 @@ final class EventsViewModel: ObservableObject {
     // MARK: - Navigation Support
 
     func hasDestination(for event: EventDoc) -> Bool {
-        if event.type.contains("deleted") {
-            return false
-        }
-
         switch event.targetType {
         case "bill":
             return billsById[event.targetId] != nil
@@ -120,8 +116,7 @@ final class EventsViewModel: ObservableObject {
             switch event.targetType {
             case "bill":
                 if let bill = billsById[event.targetId] {
-                    let category = normalizedCategory(bill.category)
-                    return "Update: \(actor) Deleted Bill (\(category))"
+                    return "Update: \(actor) Deleted \(billSummaryTitle(bill))"
                 }
                 return "Update: \(actor) Deleted Bill"
 
@@ -137,8 +132,7 @@ final class EventsViewModel: ObservableObject {
             switch event.targetType {
             case "bill":
                 if let bill = billsById[event.targetId] {
-                    let category = normalizedCategory(bill.category)
-                    return "Updated: Bill for \(category)"
+                    return "Updated: \(billSummaryTitle(bill))"
                 }
                 return "Updated: Bill"
 
@@ -159,8 +153,7 @@ final class EventsViewModel: ObservableObject {
         switch event.targetType {
         case "bill":
             if let bill = billsById[event.targetId] {
-                let category = normalizedCategory(bill.category)
-                return "Bill: \(category) - \(currencyString(bill.amount))"
+                return billSummaryTitle(bill)
             }
             return "Bill"
 
@@ -184,8 +177,7 @@ final class EventsViewModel: ObservableObject {
             switch event.targetType {
             case "bill":
                 if let bill = billsById[event.targetId] {
-                    let category = normalizedCategory(bill.category)
-                    return "\(actor) deleted Bill (\(category))"
+                    return "\(actor) deleted \(billParticipantSummary(bill))"
                 }
                 return "\(actor) deleted Bill"
 
@@ -219,7 +211,7 @@ final class EventsViewModel: ObservableObject {
         switch event.targetType {
         case "bill":
             if let bill = billsById[event.targetId] {
-                return "Paid by: \(displayName(for: bill.paidByUid))"
+                return billParticipantSummary(bill)
             }
             return event.type
 
@@ -235,16 +227,12 @@ final class EventsViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Helpers
-
     func displayDate(for event: EventDoc) -> String {
-
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .none
 
         switch event.targetType {
-
         case "bill":
             if let bill = billsById[event.targetId] {
                 return formatter.string(from: bill.date)
@@ -261,8 +249,51 @@ final class EventsViewModel: ObservableObject {
 
         return formatter.string(from: event.createdAt)
     }
-    
-    
+
+    // MARK: - Bill summaries
+
+    private func billSummaryTitle(_ bill: BillDoc) -> String {
+        let category = normalizedCategory(bill.category)
+        return "Bill: \(category) - \(currencyString(bill.amount))"
+    }
+
+    private func billParticipantSummary(_ bill: BillDoc) -> String {
+        let payer = displayName(for: bill.paidByUid)
+
+        if let splitEntries = bill.splitEntries, !splitEntries.isEmpty {
+            let names = splitEntries.map { entryDisplayName($0) }
+            let guestCount = splitEntries.filter { $0.isGuest }.count
+
+            if names.isEmpty {
+                return "Paid by: \(payer)"
+            }
+
+            if guestCount > 0 {
+                return "Paid by: \(payer) • Split with \(names.joined(separator: ", "))"
+            }
+
+            return "Paid by: \(payer) • Split with \(names.joined(separator: ", "))"
+        }
+
+        if bill.participantUids.isEmpty {
+            return "Paid by: \(payer)"
+        }
+
+        let names = bill.participantUids.map { displayName(for: $0) }
+        return "Paid by: \(payer) • Split with \(names.joined(separator: ", "))"
+    }
+
+    // MARK: - Helpers
+
+    private func entryDisplayName(_ entry: BillSplitEntry) -> String {
+        if let uid = entry.uid, !uid.isEmpty {
+            return displayName(for: uid)
+        }
+
+        let trimmed = entry.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Guest" : trimmed
+    }
+
     private func displayName(for uid: String) -> String {
         guard !uid.isEmpty else { return "Unknown" }
 
@@ -271,6 +302,11 @@ final class EventsViewModel: ObservableObject {
             if !trimmedName.isEmpty { return trimmedName }
             if let email = member.email, !email.isEmpty { return email }
         }
+
+        if uid.hasPrefix("guest:") {
+            return uid.replacingOccurrences(of: "guest:", with: "")
+        }
+
         return uid
     }
 
@@ -294,26 +330,5 @@ final class EventsViewModel: ObservableObject {
     private func currencyString(_ amount: Double) -> String {
         let code = Locale.current.currency?.identifier ?? "USD"
         return amount.formatted(.currency(code: code))
-    }
-
-    private func changeText(for event: EventDoc) -> String {
-        switch event.targetType {
-        case "bill":
-            if let bill = billsById[event.targetId] {
-                return "Now \(normalizedCategory(bill.category)) - \(currencyString(bill.amount))"
-            }
-            return "Changes saved"
-
-        case "payment":
-            if let payment = paymentsById[event.targetId] {
-                let payer = displayName(for: payment.paidByUid)
-                let receiver = displayName(for: payment.paidToUid ?? "")
-                return "Now \(payer) → \(receiver) \(currencyString(payment.amount))"
-            }
-            return "Changes saved"
-
-        default:
-            return "Changes saved"
-        }
     }
 }

@@ -1,3 +1,10 @@
+//
+//  BillMateApp.swift
+//  BillMate
+//
+//
+//
+
 import SwiftUI
 import FirebaseCore
 

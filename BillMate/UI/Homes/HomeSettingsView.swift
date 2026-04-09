@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import FirebaseFirestore
 
 struct HomeSettingsView: View {
     @EnvironmentObject private var appState: AppState
@@ -24,6 +25,10 @@ struct HomeSettingsView: View {
 
     @State private var confirmLeave = false
     @State private var confirmDelete = false
+    
+    @State private var homeName: String = ""
+    
+    @State private var memberToRemove: MemberDoc?
 
     var body: some View {
         NavigationStack {
@@ -36,6 +41,22 @@ struct HomeSettingsView: View {
                             .foregroundStyle(.red)
                             .multilineTextAlignment(.center)
                             .padding(.vertical, 4)
+                    }
+                }
+                
+                if appState.activeRole == .admin {
+                    Section("Home Name") {
+                        TextField("Home name", text: $homeName)
+
+                        Button(isBusy ? "Saving..." : "Save Name") {
+                            Task { await renameHome() }
+                        }
+                        .disabled(
+                            isBusy ||
+                            homeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                            homeName.trimmingCharacters(in: .whitespacesAndNewlines) ==
+                            (appState.activeHome?.name.trimmingCharacters(in: .whitespacesAndNewlines) ?? "")
+                        )
                     }
                 }
 
@@ -100,16 +121,18 @@ struct HomeSettingsView: View {
 
             // Confirm remove member alert
             .alert("Remove Member?", isPresented: Binding(
-                get: { confirmRemoveUid != nil },
-                set: { if !$0 { confirmRemoveUid = nil } }
+                get: { memberToRemove != nil },
+                set: { if !$0 { memberToRemove = nil } }
             )) {
-                Button("Cancel", role: .cancel) { confirmRemoveUid = nil }
+                Button("Cancel", role: .cancel) { memberToRemove = nil }
                 Button("Remove", role: .destructive) {
-                    guard let uid = confirmRemoveUid else { return }
+                    guard let uid = memberToRemove?.uid else { return }
                     Task { await removeMember(uid: uid) }
                 }
             } message: {
-                Text("Remove \(confirmRemoveName) from this home?")
+                if let member = memberToRemove {
+                    Text("Remove \(displayName(for: member)) from this home?")
+                }
             }
 
             // Confirm leave
@@ -176,8 +199,7 @@ struct HomeSettingsView: View {
                     Divider()
 
                     Button("Remove from Home", role: .destructive) {
-                        confirmRemoveUid = m.uid
-                        confirmRemoveName = display
+                        memberToRemove = m
                     }
                 } label: {
                     Image(systemName: "ellipsis")
@@ -188,11 +210,48 @@ struct HomeSettingsView: View {
     }
 
     // MARK: - Actions
+    
+    private func renameHome() async {
+        localError = nil
+
+        guard appState.activeRole == .admin else {
+            localError = "Only admins can rename a home."
+            return
+        }
+
+        guard let homeId = appState.activeHome?.id else { return }
+
+        let trimmed = homeName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            localError = "Home name is required."
+            return
+        }
+
+        isBusy = true
+        defer { isBusy = false }
+
+        do {
+            try await FirestoreService.homeRef(homeId).updateData([
+                "name": trimmed
+            ])
+
+            if var activeHome = appState.activeHome {
+                activeHome.name = trimmed
+                appState.activeHome = activeHome
+            }
+        } catch {
+            localError = error.localizedDescription
+        }
+    }
 
     private func reloadMembers() async {
         localError = nil
         guard let homeId = appState.activeHome?.id else { return }
 
+        if homeName.isEmpty {
+            homeName = appState.activeHome?.name ?? ""
+        }
+        
         isBusy = true
         defer { isBusy = false }
 

@@ -3,7 +3,7 @@ import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject private var appState: AppState
-    @StateObject private var authVM = AuthViewModel()
+    @EnvironmentObject private var authVM: AuthViewModel
 
     var body: some View {
         Group {

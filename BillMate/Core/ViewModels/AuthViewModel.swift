@@ -1,6 +1,7 @@
 import Combine
 import Foundation
 import FirebaseAuth
+import FirebaseFirestore
 
 @MainActor
 final class AuthViewModel: ObservableObject {
@@ -15,10 +16,15 @@ final class AuthViewModel: ObservableObject {
 
     func startListening(appState: AppState) {
         if handle != nil { return }
+
         handle = Auth.auth().addStateDidChangeListener { _, user in
             Task { @MainActor in
                 if let user {
-                    appState.authUser = AuthUser(uid: user.uid, email: user.email, name: user.displayName)
+                    appState.authUser = AuthUser(
+                        uid: user.uid,
+                        email: user.email,
+                        name: user.displayName
+                    )
                 } else {
                     appState.authUser = nil
                     appState.resetHomeSelection()
@@ -34,6 +40,20 @@ final class AuthViewModel: ObservableObject {
         }
     }
 
+    func signInWithGoogle(appState: AppState) async {
+        errorMessage = nil
+        isBusy = true
+        defer { isBusy = false }
+
+        do {
+            let user = try await AuthService.signInWithGoogle()
+            try await upsertUserDocument(for: user)
+            appState.authUser = user
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func signIn(appState: AppState) async {
         errorMessage = nil
         isBusy = true
@@ -44,7 +64,13 @@ final class AuthViewModel: ObservableObject {
                 email: email.trimmingCharacters(in: .whitespacesAndNewlines),
                 password: password
             )
-            appState.authUser = AuthService.currentUser()
+
+            if let user = AuthService.currentUser() {
+                try await upsertUserDocument(for: user)
+                appState.authUser = user
+            } else {
+                errorMessage = "Signed in, but no user was returned."
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -68,13 +94,18 @@ final class AuthViewModel: ObservableObject {
                 password: password
             )
 
-            if let user = Auth.auth().currentUser {
-                let req = user.createProfileChangeRequest()
+            if let firebaseUser = Auth.auth().currentUser {
+                let req = firebaseUser.createProfileChangeRequest()
                 req.displayName = trimmedName
                 try await req.commitChanges()
             }
 
-            appState.authUser = AuthService.currentUser()
+            if let user = AuthService.currentUser() {
+                try await upsertUserDocument(for: user)
+                appState.authUser = user
+            } else {
+                errorMessage = "Account created, but no user was returned."
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -82,6 +113,7 @@ final class AuthViewModel: ObservableObject {
 
     func signOut(appState: AppState) {
         errorMessage = nil
+
         do {
             try AuthService.signOut()
             appState.authUser = nil
@@ -89,5 +121,22 @@ final class AuthViewModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func upsertUserDocument(for user: AuthUser) async throws {
+        let trimmedName = (user.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let safeName = trimmedName.isEmpty
+            ? ((user.email ?? "User").components(separatedBy: "@").first ?? "User")
+            : trimmedName
+
+        let data: [String: Any] = [
+            "uid": user.uid,
+            "email": user.email as Any,
+            "name": safeName,
+            "updatedAt": Timestamp(date: Date()),
+            "createdAt": FieldValue.serverTimestamp()
+        ]
+
+        try await FirestoreService.userRef(user.uid).setData(data, merge: true)
     }
 }

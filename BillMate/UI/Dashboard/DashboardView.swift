@@ -15,7 +15,6 @@ struct DashboardView: View {
 
     @StateObject private var dashVM = DashboardViewModel()
 
-    @State private var showHomePicker = false
     @State private var showInviteAlert = false
     @State private var inviteCode: String = ""
     @State private var inviteError: String?
@@ -36,89 +35,111 @@ struct DashboardView: View {
     @State private var visibleTransactionCount: Int = 10
 
     @State private var floatingButtonsVisible = true
-    @State private var lastScrollOffset: CGFloat = 0
-
-    @State private var billPendingDelete: BillDoc?
-    @State private var paymentPendingDelete: PaymentDoc?
+    @State private var dragStartY: CGFloat = 0
+    
     @State private var localError: String?
+    
+    @State private var showLeaveHomeConfirm = false
+    
 
     var body: some View {
         NavigationStack {
-            dashboardList
-                .navigationTitle(appState.activeHome?.name ?? "Dashboard")
-                .toolbar { dashboardToolbar }
-                .overlay(alignment: .bottomTrailing) {
-                    if floatingButtonsVisible {
-                        floatingActionButtons
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
-                    }
-                }
-                .sheet(isPresented: $showHomeSettings) {
-                    HomeSettingsView()
-                        .environmentObject(appState)
-                        .environmentObject(homesVM)
-                }
-                .sheet(isPresented: $showRecycleBin) {
-                    RecycleBinView()
-                        .environmentObject(appState)
-                        .environmentObject(homesVM)
-                }
-                .sheet(isPresented: $showShareSheet) {
-                    ShareSheet(items: shareItems)
-                }
-                .sheet(isPresented: $showFeedSheet) {
-                    NavigationStack {
-                        NotificationsView()
-                    }
-                }
-                .sheet(isPresented: $showAddBillSheet) {
-                    AddBillView { didAdd in
-                        if didAdd {
-                            Task { await reload() }
-                        }
-                    }
-                    .environmentObject(appState)
-                }
-                .sheet(isPresented: $showAddPaymentSheet) {
-                    AddPaymentView { didAdd in
-                        if didAdd {
-                            Task { await reload() }
-                        }
-                    }
-                    .environmentObject(appState)
-                }
+            ZStack(alignment: .bottomTrailing) {
+                dashboardList
                 
-                .alert("Invite Code", isPresented: $showInviteAlert) {
-                    Button("Copy Code") {
-                        UIPasteboard.general.string = inviteCode
-                        showCopiedAlert = true
+                if floatingButtonsVisible {
+                    floatingActionButtons
+                        .padding(.trailing, 20)
+                        .padding(.bottom, 28)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                        .zIndex(10)
+                }
+            }
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { dashboardToolbar }
+            .sheet(isPresented: $showHomeSettings) {
+                HomeSettingsView()
+                    .environmentObject(appState)
+                    .environmentObject(homesVM)
+            }
+            .sheet(isPresented: $showRecycleBin) {
+                RecycleBinView()
+                    .environmentObject(appState)
+                    .environmentObject(homesVM)
+            }
+            .sheet(isPresented: $showShareSheet) {
+                ShareSheet(items: shareItems)
+            }
+            .sheet(isPresented: $showFeedSheet) {
+                NavigationStack {
+                    NotificationsView()
+                        .environmentObject(appState)
+                }
+            }
+            .sheet(isPresented: $showAddBillSheet) {
+                AddBillView { didAdd in
+                    if didAdd {
+                        Task { await reload() }
                     }
-
-                    Button("Share…") {
-                        let msg = inviteShareMessage(code: inviteCode)
-                        shareItems = [msg]
-                        showShareSheet = true
+                }
+                .environmentObject(appState)
+            }
+            .sheet(isPresented: $showAddPaymentSheet) {
+                AddPaymentView { didAdd in
+                    if didAdd {
+                        Task { await reload() }
                     }
+                }
+                .environmentObject(appState)
+            }
+            .alert("Invite Code", isPresented: $showInviteAlert) {
+                Button("Copy Code") {
+                    UIPasteboard.general.string = inviteCode
+                    showCopiedAlert = true
+                }
 
-                    Button("OK", role: .cancel) { }
-                } message: {
-                    Text(inviteCode)
+                Button("Share…") {
+                    let msg = inviteShareMessage(code: inviteCode)
+                    shareItems = [msg]
+                    showShareSheet = true
                 }
-                .alert("Copied", isPresented: $showCopiedAlert) {
-                    Button("OK", role: .cancel) { }
-                } message: {
-                    Text("Invite code copied to clipboard.")
+
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(inviteCode)
+            }
+            .confirmationDialog(
+                "Leave Home?",
+                isPresented: $showLeaveHomeConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Leave Home", role: .destructive) {
+                    Task { await leaveHomeTapped() }
                 }
-                .task {
-                    await loadHomes()
-                    await reload()
-                }
-                .onChange(of: transactionFilter) { _, _ in
-                    visibleTransactionCount = 10
-                }
-                .onChange(of: appState.activeHome?.id) { _, _ in
-                    visibleTransactionCount = 10
-                }
+
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("You will lose access to this home unless someone invites you again. If you are the only admin, promote someone else first.")
+            }
+            .alert("Copied", isPresented: $showCopiedAlert) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text("Invite code copied to clipboard.")
+            }
+            .task {
+                await loadHomes()
+                await reload()
+                floatingButtonsVisible = true
+            }
+            .onChange(of: transactionFilter) { _, _ in
+                visibleTransactionCount = 10
+            }
+            .onChange(of: appState.activeHome?.id) { _, _ in
+                visibleTransactionCount = 10
+                floatingButtonsVisible = true
+                dragStartY = 0
+            }
         }
     }
 
@@ -138,33 +159,32 @@ struct DashboardView: View {
             transactionsSection
         }
         .listStyle(.insetGrouped)
-        .coordinateSpace(name: "dashboardScroll")
-        .overlay(alignment: .top) {
-            GeometryReader { geo in
-                Color.clear
-                    .preference(
-                        key: DashboardScrollOffsetKey.self,
-                        value: geo.frame(in: .named("dashboardScroll")).minY
-                    )
-            }
-            .frame(height: 0)
-        }
-        .onPreferenceChange(DashboardScrollOffsetKey.self) { newValue in
-            let delta = newValue - lastScrollOffset
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 8)
+                .onChanged { value in
+                    if dragStartY == 0 {
+                        dragStartY = value.startLocation.y
+                    }
 
-            if delta < -8 {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    floatingButtonsVisible = false
-                    showQuickAddOptions = false
-                }
-            } else if delta > 8 {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    floatingButtonsVisible = true
-                }
-            }
+                    let delta = value.location.y - dragStartY
 
-            lastScrollOffset = newValue
-        }
+                    if delta < -20, floatingButtonsVisible {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            floatingButtonsVisible = false
+                            showQuickAddOptions = false
+                        }
+                    }
+
+                    if delta > 20, !floatingButtonsVisible {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            floatingButtonsVisible = true
+                        }
+                    }
+                }
+                .onEnded { _ in
+                    dragStartY = 0
+                }
+        )
     }
 
     // MARK: - Spending Chart
@@ -176,15 +196,21 @@ struct DashboardView: View {
                 let total = dashVM.monthlyTotalSpent(for: uid)
 
                 if data.isEmpty {
-                    VStack(spacing: 10) {
+                    VStack(spacing: 6) {
                         Text(currentMonthTitle)
                             .font(.headline)
 
-                        Text("No categorized spending yet.")
-                            .foregroundStyle(.secondary)
+                        HStack(spacing: 6) {
+                            Image(systemName: "chart.pie")
+                                .font(.subheadline)
+
+                            Text("No categorized spending yet")
+                        }
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                     }
-                    .frame(maxWidth: .infinity, minHeight: 220)
-                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
                 } else {
                     VStack(alignment: .leading, spacing: 16) {
                         Text(currentMonthTitle)
@@ -256,12 +282,16 @@ struct DashboardView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(dashVM.balances) { b in
-                    NavigationLink {
-                        MemberLedgerView(memberUid: b.id, memberName: b.displayName)
-                    } label: {
+                    if isGuestBalance(b) {
                         HStack {
-                            Text(b.displayName)
-                                .lineLimit(1)
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 6) {
+                                    Text(displayBalanceName(b))
+                                        .lineLimit(1)
+
+                                    guestBadge
+                                }
+                            }
 
                             Spacer()
 
@@ -269,6 +299,40 @@ struct DashboardView: View {
                                 .foregroundStyle(colorFor(owed: b.amountOwed))
                                 .monospacedDigit()
                         }
+                    } else {
+                        NavigationLink {
+                            MemberLedgerView(
+                                memberUid: b.id,
+                                memberName: displayBalanceName(b)
+                            )
+                        } label: {
+                            HStack {
+                                Text(displayBalanceName(b))
+                                    .lineLimit(1)
+
+                                Spacer()
+
+                                Text(b.amountOwed, format: .currency(code: currencyCode()))
+                                    .foregroundStyle(colorFor(owed: b.amountOwed))
+                                    .monospacedDigit()
+                            }
+                        }
+                    }
+                }
+
+                NavigationLink {
+                    ConsolidateView(
+                        members: dashVM.members,
+                        bills: dashVM.bills,
+                        payments: dashVM.payments,
+                        currencyCode: currencyCode()
+                    )
+                } label: {
+                    HStack {
+                        Image(systemName: "arrow.left.arrow.right")
+                        Text("Consolodate")
+                            .fontWeight(.semibold)
+                        Spacer()
                     }
                 }
             }
@@ -314,14 +378,11 @@ struct DashboardView: View {
                     }
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         if appState.activeRole == .admin {
-
                             switch row.kind {
-
                             case .bill:
                                 if let bill = row.bill,
                                    let billId = bill.id,
                                    let homeId = appState.activeHome?.id {
-
                                     Button(role: .destructive) {
                                         Task {
                                             await softDeleteBill(homeId: homeId, billId: billId)
@@ -336,7 +397,6 @@ struct DashboardView: View {
                                 if let payment = row.payment,
                                    let paymentId = payment.id,
                                    let homeId = appState.activeHome?.id {
-
                                     Button(role: .destructive) {
                                         Task {
                                             await softDeletePayment(homeId: homeId, paymentId: paymentId)
@@ -371,7 +431,7 @@ struct DashboardView: View {
         for bill in dashVM.bills {
             let payer = displayName(for: bill.paidByUid)
             let title = bill.description
-            let subtitle = "Bill • Paid by \(payer)"
+            let subtitle = billSubtitle(for: bill, payer: payer)
 
             rows.append(
                 DashboardTransactionRow(
@@ -527,8 +587,6 @@ struct DashboardView: View {
                 }
             }
         }
-        .padding(.trailing, 20)
-        .padding(.bottom, 28)
     }
 
     private func floatingIconButton(systemImage: String) -> some View {
@@ -560,8 +618,17 @@ struct DashboardView: View {
     @ToolbarContentBuilder
     private var dashboardToolbar: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
-            Button("Homes") {
+            Button {
                 appState.resetHomeSelection()
+            } label: {
+                HStack(spacing: 6) {
+                    Text(appState.activeHome?.name ?? "Homes")
+                        .font(.system(size: 17, weight: .semibold))
+
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .foregroundStyle(.primary)
             }
         }
 
@@ -571,20 +638,26 @@ struct DashboardView: View {
                     Button("Home Settings") {
                         showHomeSettings = true
                     }
-                }
 
-                if appState.activeRole == .admin {
                     Button("Create Invite Code") {
                         Task { await createInviteTapped() }
                     }
+
+                    Divider()
+
+                    Button {
+                        showRecycleBin = true
+                    } label: {
+                        Label("Recycle Bin", systemImage: "trash")
+                    }
+
+                    Divider()
                 }
 
-                Divider()
-
-                Button {
-                    showRecycleBin = true
+                Button(role: .destructive) {
+                    showLeaveHomeConfirm = true
                 } label: {
-                    Label("Recycle Bin", systemImage: "trash")
+                    Label("Leave Home", systemImage: "rectangle.portrait.and.arrow.right")
                 }
 
                 Divider()
@@ -726,6 +799,62 @@ struct DashboardView: View {
     }
 
     // MARK: - Helpers
+    
+    private func leaveHomeTapped() async {
+        guard let homeId = appState.activeHome?.id else {
+            localError = "No active home selected."
+            return
+        }
+
+        let ok = await homesVM.leaveHomeSafely(appState: appState, homeId: homeId)
+        if !ok {
+            localError = homesVM.errorMessage
+        }
+    }
+    
+    private func billSubtitle(for bill: BillDoc, payer: String) -> String {
+        if let splitEntries = bill.splitEntries, !splitEntries.isEmpty {
+            let names = splitEntries.map { splitEntryDisplayName($0) }
+            let joined = names.joined(separator: ", ")
+            return "Bill • Paid by \(payer) • Split with \(joined)"
+        }
+
+        return "Bill • Paid by \(payer)"
+    }
+
+    private func splitEntryDisplayName(_ entry: BillSplitEntry) -> String {
+        if let uid = entry.uid, !uid.isEmpty {
+            return displayName(for: uid)
+        }
+
+        let trimmed = entry.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Guest" : trimmed
+    }
+    
+    private var guestBadge: some View {
+        Text("Guest")
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Color(.systemGray5))
+            .clipShape(Capsule())
+    }
+
+    private func isGuestBalance(_ balance: MemberBalance) -> Bool {
+        balance.id.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .hasPrefix("guest:")
+    }
+
+    private func displayBalanceName(_ balance: MemberBalance) -> String {
+        let trimmed = balance.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if trimmed.lowercased().hasPrefix("guest:") {
+            return String(trimmed.dropFirst(6)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        return trimmed
+    }
 
     private func colorForCategory(_ category: String) -> Color {
         switch category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
@@ -825,14 +954,6 @@ private struct DashboardTransactionRow: Identifiable {
 
 // MARK: - Scroll Tracking
 
-private struct DashboardScrollOffsetKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
 private struct HomePickerSheet: View {
     let homes: [HomeDoc]
     let onSelect: (HomeDoc) -> Void
@@ -840,12 +961,17 @@ private struct HomePickerSheet: View {
 
     var body: some View {
         NavigationStack {
-            List(homes) { h in
-                Button(h.name) { onSelect(h) }
+            List(homes) { home in
+                Button(home.name) {
+                    onSelect(home)
+                }
             }
+            .navigationTitle("Homes")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Close") { onClose() }
+                    Button("Close") {
+                        onClose()
+                    }
                 }
             }
         }

@@ -76,37 +76,37 @@ struct MemberLedgerView: View {
     private var rows: [LedgerRow] {
         var out: [LedgerRow] = []
 
-        for b in dashVM.bills {
-            let isInvolved = (b.paidByUid == memberUid) || b.participantUids.contains(memberUid)
+        for bill in dashVM.bills {
+            let isInvolved = isMemberInvolved(in: bill)
             guard isInvolved else { continue }
 
-            let payer = displayName(for: b.paidByUid)
-            let title = b.description
-            let subtitle = "Bill • Paid by \(payer)"
+            let payer = displayName(for: bill.paidByUid)
+            let title = bill.description
+            let subtitle = billLedgerSubtitle(for: bill, payer: payer)
 
             out.append(
                 LedgerRow(
                     kind: .bill,
-                    id: b.id ?? UUID().uuidString,
+                    id: bill.id ?? UUID().uuidString,
                     title: title,
                     subtitle: subtitle,
-                    amount: b.amount,
-                    date: b.date,
-                    bill: b,
+                    amount: bill.amount,
+                    date: bill.date,
+                    bill: bill,
                     payment: nil
                 )
             )
         }
 
-        for p in dashVM.payments {
-            let toUid = p.paidToUid
+        for payment in dashVM.payments {
+            let toUid = payment.paidToUid
             let isInvolved =
-                (p.paidByUid == memberUid) ||
+                (payment.paidByUid == memberUid) ||
                 ((toUid ?? "").isEmpty == false && toUid == memberUid)
 
             guard isInvolved else { continue }
 
-            let fromName = displayName(for: p.paidByUid)
+            let fromName = displayName(for: payment.paidByUid)
             let subtitle: String
             if let to = toUid, !to.isEmpty {
                 let toName = displayName(for: to)
@@ -115,18 +115,18 @@ struct MemberLedgerView: View {
                 subtitle = "Payment • Paid by \(fromName)"
             }
 
-            let title = p.note.isEmpty ? "Payment" : p.note
+            let title = payment.note.isEmpty ? "Payment" : payment.note
 
             out.append(
                 LedgerRow(
                     kind: .payment,
-                    id: p.id ?? UUID().uuidString,
+                    id: payment.id ?? UUID().uuidString,
                     title: title,
                     subtitle: subtitle,
-                    amount: p.amount,
-                    date: p.date,
+                    amount: payment.amount,
+                    date: payment.date,
                     bill: nil,
-                    payment: p
+                    payment: payment
                 )
             )
         }
@@ -189,12 +189,52 @@ struct MemberLedgerView: View {
         }
     }
 
-    private func displayName(for uid: String) -> String {
-        if let m = dashVM.members.first(where: { $0.uid == uid }) {
-            let trimmed = (m.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty { return trimmed }
-            if let email = m.email, !email.isEmpty { return email }
+    // MARK: - Bill involvement
+
+    private func isMemberInvolved(in bill: BillDoc) -> Bool {
+        if bill.paidByUid == memberUid {
+            return true
         }
+
+        if let splitEntries = bill.splitEntries, !splitEntries.isEmpty {
+            return splitEntries.contains { entry in
+                entry.uid == memberUid
+            }
+        }
+
+        return bill.participantUids.contains(memberUid)
+    }
+
+    private func billLedgerSubtitle(for bill: BillDoc, payer: String) -> String {
+        if let splitEntries = bill.splitEntries, !splitEntries.isEmpty {
+            let participantNames = splitEntries.map { splitEntryDisplayName($0) }
+            let summary = participantNames.joined(separator: ", ")
+            return "Bill • Paid by \(payer) • Split with \(summary)"
+        }
+
+        return "Bill • Paid by \(payer)"
+    }
+
+    private func splitEntryDisplayName(_ entry: BillSplitEntry) -> String {
+        if let uid = entry.uid, !uid.isEmpty {
+            return displayName(for: uid)
+        }
+
+        let trimmed = entry.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Guest" : trimmed
+    }
+
+    private func displayName(for uid: String) -> String {
+        if let member = dashVM.members.first(where: { $0.uid == uid }) {
+            let trimmed = (member.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+            if let email = member.email, !email.isEmpty { return email }
+        }
+
+        if uid.hasPrefix("guest:") {
+            return uid.replacingOccurrences(of: "guest:", with: "")
+        }
+
         return uid
     }
 

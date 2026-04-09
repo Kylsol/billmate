@@ -140,7 +140,7 @@ struct PaymentDetailView: View {
                 }
             }
 
-            if isRecycleBinItem {
+            if isRecycleBinItem && appState.activeRole == .admin {
                 Section {
                     Button("Restore Payment") {
                         showRestoreConfirm = true

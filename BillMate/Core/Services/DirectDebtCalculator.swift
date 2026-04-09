@@ -1,40 +1,43 @@
+//
+//  DirectDebtCalculator.swift
+//  BillMate
+//
+//  Created by Kyle Solomons on 3/18/26.
+//
+
 import Foundation
 
-struct MemberBalance: Identifiable {
-    let id: String
-    let displayName: String
-    let amountOwed: Double
+struct PairwiseDebt: Identifiable, Hashable {
+    let id = UUID()
+    let fromName: String
+    let toName: String
+    let amount: Double
 }
 
-enum BalanceCalculator {
-    /// Positive = owes money (red). Negative = is owed money (green).
+enum DirectDebtCalculator {
+
     static func compute(
         members: [MemberDoc],
         bills: [BillDoc],
         payments: [PaymentDoc]
-    ) -> [MemberBalance] {
+    ) -> [PairwiseDebt] {
 
         let tolerance = 0.01
-        var totals: [String: Double] = [:]
+
+        // ledger[from][to] = amount that "from" owes "to"
+        var ledger: [String: [String: Double]] = [:]
+
+        // unified participant names for members + guests
         var namesById: [String: String] = [:]
 
         for member in members {
-            totals[member.uid] = 0
             namesById[member.uid] = displayName(for: member)
         }
 
         func addDebt(from: String, to: String, amount: Double) {
             guard from != to else { return }
             guard amount > tolerance else { return }
-
-            if namesById[from] == nil { namesById[from] = from }
-            if namesById[to] == nil { namesById[to] = to }
-
-            // "from" owes money
-            totals[from, default: 0] += amount
-
-            // "to" is owed money
-            totals[to, default: 0] -= amount
+            ledger[from, default: [:]][to, default: 0] += amount
         }
 
         // MARK: - Bills
@@ -49,8 +52,11 @@ enum BalanceCalculator {
                 // New split system
                 for entry in splitEntries {
                     let participantId = participantIdentifier(for: entry)
-                    let participantName = normalizedName(entry.name, fallback: participantId)
-                    namesById[participantId] = participantName
+
+                    namesById[participantId] = normalizedName(
+                        entry.name,
+                        fallback: participantId
+                    )
 
                     guard participantId != payerId else { continue }
 
@@ -59,7 +65,11 @@ enum BalanceCalculator {
                         billTotal: bill.amount
                     )
 
-                    addDebt(from: participantId, to: payerId, amount: shareAmount)
+                    addDebt(
+                        from: participantId,
+                        to: payerId,
+                        amount: shareAmount
+                    )
                 }
             } else {
                 // Legacy fallback
@@ -77,7 +87,11 @@ enum BalanceCalculator {
 
                     guard participantUid != payerId else { continue }
 
-                    addDebt(from: participantUid, to: payerId, amount: splitAmount)
+                    addDebt(
+                        from: participantUid,
+                        to: payerId,
+                        amount: splitAmount
+                    )
                 }
             }
         }
@@ -95,26 +109,79 @@ enum BalanceCalculator {
             if namesById[from] == nil { namesById[from] = from }
             if namesById[to] == nil { namesById[to] = to }
 
-            totals[from, default: 0] -= payment.amount
-            totals[to, default: 0] += payment.amount
-        }
+            var remainingPayment = payment.amount
 
-        let balances = totals.map { (id, owed) in
-            MemberBalance(
-                id: id,
-                displayName: namesById[id] ?? id,
-                amountOwed: owed
-            )
-        }
+            if let existing = ledger[from]?[to], existing > tolerance {
+                let applied = min(existing, remainingPayment)
+                let newAmount = existing - applied
+                remainingPayment -= applied
 
-        return balances
-            .filter { abs($0.amountOwed) > tolerance }
-            .sorted { lhs, rhs in
-                if lhs.amountOwed == rhs.amountOwed {
-                    return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+                if newAmount <= tolerance {
+                    ledger[from]?[to] = nil
+                } else {
+                    ledger[from]?[to] = newAmount
                 }
-                return lhs.amountOwed > rhs.amountOwed
             }
+
+            if remainingPayment > tolerance {
+                addDebt(
+                    from: to,
+                    to: from,
+                    amount: remainingPayment
+                )
+            }
+        }
+
+        // MARK: - Pairwise Netting
+
+        let participantIds = Array(namesById.keys).sorted()
+
+        for from in participantIds {
+            for to in participantIds {
+                if from >= to { continue }
+
+                let forward = ledger[from]?[to] ?? 0
+                let reverse = ledger[to]?[from] ?? 0
+
+                if forward > tolerance && reverse > tolerance {
+                    if forward > reverse {
+                        ledger[from]?[to] = forward - reverse
+                        ledger[to]?[from] = nil
+                    } else if reverse > forward {
+                        ledger[to]?[from] = reverse - forward
+                        ledger[from]?[to] = nil
+                    } else {
+                        ledger[from]?[to] = nil
+                        ledger[to]?[from] = nil
+                    }
+                }
+            }
+        }
+
+        // MARK: - Convert to UI rows
+
+        var results: [PairwiseDebt] = []
+
+        for (fromId, targets) in ledger {
+            for (toId, amount) in targets {
+                guard amount > tolerance else { continue }
+
+                results.append(
+                    PairwiseDebt(
+                        fromName: namesById[fromId] ?? fromId,
+                        toName: namesById[toId] ?? toId,
+                        amount: amount
+                    )
+                )
+            }
+        }
+
+        return results.sorted {
+            if $0.fromName == $1.fromName {
+                return $0.toName < $1.toName
+            }
+            return $0.fromName < $1.fromName
+        }
     }
 
     // MARK: - Helpers

@@ -79,6 +79,7 @@ struct BillDetailView: View {
                     detailRow("Amount", value: bill.amount.formatted(.currency(code: currencyCode())))
                     detailRow("Category", value: bill.category ?? "Other")
                     detailRow("Date", value: bill.date.formatted(date: .abbreviated, time: .omitted))
+                    detailRow("Split Mode", value: splitModeLabel)
                 }
             }
 
@@ -121,7 +122,40 @@ struct BillDetailView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 } else {
-                    if bill.participantUids.isEmpty {
+                    if let splitEntries = bill.splitEntries, !splitEntries.isEmpty {
+                        ForEach(splitEntries, id: \.id) { entry in
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text(entryDisplayName(entry))
+                                        .font(.body)
+
+                                    if entry.isGuest {
+                                        Text("Guest")
+                                            .font(.caption)
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 2)
+                                            .background(Color(.systemGray5))
+                                            .clipShape(Capsule())
+                                    }
+
+                                    Spacer()
+
+                                    if let amount = entry.amount {
+                                        Text(amount, format: .currency(code: currencyCode()))
+                                            .foregroundStyle(.secondary)
+                                            .monospacedDigit()
+                                    }
+                                }
+
+                                if let percentage = entry.percentage {
+                                    Text("\(percentage, specifier: "%.2f")%")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    } else if bill.participantUids.isEmpty {
                         Text("No participants")
                             .foregroundStyle(.secondary)
                     } else {
@@ -162,7 +196,7 @@ struct BillDetailView: View {
                 }
             }
 
-            if isRecycleBinItem {
+            if isRecycleBinItem && appState.activeRole == .admin {
                 Section {
                     Button("Restore Bill") {
                         showRestoreConfirm = true
@@ -378,6 +412,26 @@ struct BillDetailView: View {
             Text(value)
                 .multilineTextAlignment(.trailing)
         }
+    }
+
+    private var splitModeLabel: String {
+        switch (bill.splitMode ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "custom":
+            return "Custom"
+        case "equal":
+            return "Equal"
+        default:
+            return bill.splitEntries?.isEmpty == false ? "Custom" : "Equal"
+        }
+    }
+
+    private func entryDisplayName(_ entry: BillSplitEntry) -> String {
+        if let uid = entry.uid, !uid.isEmpty {
+            return displayName(for: uid, members: dashVM.members)
+        }
+
+        let trimmed = entry.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Guest" : trimmed
     }
 
     private func displayName(for uid: String, members: [MemberDoc]) -> String {

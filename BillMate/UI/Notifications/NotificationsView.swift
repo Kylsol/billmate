@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import FirebaseFirestore
 
 struct NotificationsView: View {
     @EnvironmentObject private var appState: AppState
@@ -104,12 +105,15 @@ struct NotificationsView: View {
             if let bill = vm.bill(for: event) {
                 BillDetailView(
                     bill: bill,
-                    isRecycleBinItem: false,
+                    isRecycleBinItem: (bill.isDeleted ?? false),
                     onChanged: {
                         Task {
                             guard let homeId = appState.activeHome?.id else { return }
                             await vm.load(homeId: homeId)
                         }
+                    },
+                    onRestore: { restoredBill in
+                        await restoreBillFromFeed(restoredBill)
                     }
                 )
             } else {
@@ -121,12 +125,15 @@ struct NotificationsView: View {
             if let payment = vm.payment(for: event) {
                 PaymentDetailView(
                     payment: payment,
-                    isRecycleBinItem: false,
+                    isRecycleBinItem: (payment.isDeleted ?? false),
                     onChanged: {
                         Task {
                             guard let homeId = appState.activeHome?.id else { return }
                             await vm.load(homeId: homeId)
                         }
+                    },
+                    onRestore: { restoredPayment in
+                        await restorePaymentFromFeed(restoredPayment)
                     }
                 )
             } else {
@@ -137,6 +144,50 @@ struct NotificationsView: View {
         default:
             Text("No detail available.")
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private func restoreBillFromFeed(_ bill: BillDoc) async {
+        guard appState.activeRole == .admin,
+              let homeId = appState.activeHome?.id,
+              let billId = bill.id else { return }
+
+        do {
+            try await FirestoreService.billsCol(homeId)
+                .document(billId)
+                .updateData([
+                    "isDeleted": false,
+                    "deletedAt": FieldValue.delete(),
+                    "deleteExpiresAt": FieldValue.delete(),
+                    "deletedByUid": FieldValue.delete(),
+                    "deletedByName": FieldValue.delete()
+                ])
+
+            await vm.load(homeId: homeId)
+        } catch {
+            vm.errorMessage = error.localizedDescription
+        }
+    }
+
+    private func restorePaymentFromFeed(_ payment: PaymentDoc) async {
+        guard appState.activeRole == .admin,
+              let homeId = appState.activeHome?.id,
+              let paymentId = payment.id else { return }
+
+        do {
+            try await FirestoreService.paymentsCol(homeId)
+                .document(paymentId)
+                .updateData([
+                    "isDeleted": false,
+                    "deletedAt": FieldValue.delete(),
+                    "deleteExpiresAt": FieldValue.delete(),
+                    "deletedByUid": FieldValue.delete(),
+                    "deletedByName": FieldValue.delete()
+                ])
+
+            await vm.load(homeId: homeId)
+        } catch {
+            vm.errorMessage = error.localizedDescription
         }
     }
 }

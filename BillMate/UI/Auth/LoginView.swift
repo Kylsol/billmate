@@ -24,11 +24,10 @@ struct LoginView: View {
                     }
                     .pickerStyle(.segmented)
                     .onChange(of: mode) { _, newMode in
-                        // reset create-only validation when switching modes
                         didSubmitCreate = false
                         authVM.errorMessage = nil
                         if newMode == .signIn {
-                            authVM.name = "" // don’t carry name into sign-in
+                            authVM.name = ""
                         }
                     }
                 }
@@ -48,8 +47,8 @@ struct LoginView: View {
                     SecureField("Password", text: $authVM.password)
                 }
 
-                // only show "Name is required" after user taps Create Account
-                if mode == .create, didSubmitCreate,
+                if mode == .create,
+                   didSubmitCreate,
                    authVM.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Section {
                         Text("Name is required.")
@@ -76,7 +75,6 @@ struct LoginView: View {
                             case .create:
                                 didSubmitCreate = true
 
-                                // Don’t even call Firebase if name is empty
                                 if authVM.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                                     return
                                 }
@@ -86,9 +84,27 @@ struct LoginView: View {
                                     clearFields()
                                     hideKeyboard()
                                     didSubmitCreate = false
-                                    mode = .signIn // optional: go back to sign in
+                                    mode = .signIn
                                 }
                             }
+                        }
+                    }
+                    .disabled(authVM.isBusy)
+                }
+
+                Section("Or") {
+                    Button {
+                        Task {
+                            await authVM.signInWithGoogle(appState: appState)
+                            if authVM.errorMessage == nil {
+                                clearFields()
+                                hideKeyboard()
+                            }
+                        }
+                    } label: {
+                        HStack {
+                            Image(systemName: "globe")
+                            Text(authVM.isBusy ? "Working..." : "Sign in with Google")
                         }
                     }
                     .disabled(authVM.isBusy)
@@ -106,8 +122,12 @@ struct LoginView: View {
 
     private func hideKeyboard() {
         #if canImport(UIKit)
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
-                                        to: nil, from: nil, for: nil)
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
         #endif
     }
 }

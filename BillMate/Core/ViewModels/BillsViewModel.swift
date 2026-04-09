@@ -63,6 +63,7 @@ final class BillsViewModel: ObservableObject {
                 changedField: nil,
                 oldValue: nil,
                 newValue: nil,
+                changeCount: nil,
                 createdAt: Date()
             )
             _ = try? FirestoreService.eventsCol(homeId).addDocument(from: event)
@@ -136,18 +137,37 @@ final class BillsViewModel: ObservableObject {
         )
 
         do {
+            var updateData: [String: Any] = [
+                "description": trimmedDescription,
+                "amount": amount,
+                "date": Timestamp(date: date),
+                "category": trimmedCategory,
+                "paidByUid": paidByUid,
+                "participantUids": participantUids,
+                "updatedAt": Timestamp(date: Date()),
+                "updatedByUid": actorUid
+            ]
+
+            // Preserve new split model if this bill already uses it.
+            if let existingSplitEntries = originalBill.splitEntries,
+               !existingSplitEntries.isEmpty {
+
+                let filteredEntries = existingSplitEntries.filter { entry in
+                    if let uid = entry.uid, !uid.isEmpty {
+                        return participantUids.contains(uid)
+                    }
+                    return true // keep guests
+                }
+
+                updateData["splitEntries"] = try encodeSplitEntries(filteredEntries)
+                updateData["splitMode"] = originalBill.splitMode ?? "custom"
+            } else {
+                updateData["splitMode"] = originalBill.splitMode ?? "equal"
+            }
+
             try await FirestoreService.billsCol(homeId)
                 .document(billId)
-                .updateData([
-                    "description": trimmedDescription,
-                    "amount": amount,
-                    "date": Timestamp(date: date),
-                    "category": trimmedCategory,
-                    "paidByUid": paidByUid,
-                    "participantUids": participantUids,
-                    "updatedAt": Timestamp(date: Date()),
-                    "updatedByUid": actorUid
-                ])
+                .updateData(updateData)
 
             let targetCategory = trimmedCategory.isEmpty ? "Other" : trimmedCategory
             let event = EventDoc(
@@ -161,6 +181,7 @@ final class BillsViewModel: ObservableObject {
                 changedField: detected?.field,
                 oldValue: detected?.oldValue,
                 newValue: detected?.newValue,
+                changeCount: nil,
                 createdAt: Date()
             )
             _ = try? FirestoreService.eventsCol(homeId).addDocument(from: event)
@@ -234,6 +255,24 @@ final class BillsViewModel: ObservableObject {
         }
 
         return nil
+    }
+
+    // MARK: - Helpers
+
+    private func encodeSplitEntries(_ entries: [BillSplitEntry]) throws -> [[String: Any]] {
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(entries)
+        let object = try JSONSerialization.jsonObject(with: data, options: [])
+
+        guard let array = object as? [[String: Any]] else {
+            throw NSError(
+                domain: "BillMate",
+                code: 500,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to encode split entries."]
+            )
+        }
+
+        return array
     }
 
     private func normalizedCategory(_ value: String?) -> String {
