@@ -1,10 +1,10 @@
 import Foundation
 import FirebaseFirestore
 
-/// Firestore model for homes/{homeId}
-struct HomeDoc: Codable, Identifiable {
+/// Firestore model for groups/{groupId}
+struct GroupDoc: Codable, Identifiable {
 
-    // Firestore document id (homeId)
+    // Firestore document id (GroupId)
     @DocumentID var id: String?
 
     // Core fields

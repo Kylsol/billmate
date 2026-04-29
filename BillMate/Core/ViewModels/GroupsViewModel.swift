@@ -4,12 +4,12 @@ import FirebaseFirestore
 import FirebaseAuth
 
 @MainActor
-final class HomesViewModel: ObservableObject {
+final class GroupsViewModel: ObservableObject {
 
     // MARK: - Published UI State
 
-    /// Homes shown in the "Home selection" list (ACTIVE only, not deleted).
-    @Published var homes: [HomeDoc] = []
+    /// Groups shown in the "Group selection" list (ACTIVE only, not deleted).
+    @Published var groups: [GroupDoc] = []
 
     /// Any error text you want to show in alerts / inline UI.
     @Published var errorMessage: String?
@@ -17,12 +17,12 @@ final class HomesViewModel: ObservableObject {
     /// Use this to show a spinner / disable buttons while work runs.
     @Published var isBusy: Bool = false
     
-    // MARK: - Leave Home (Safe)
+    // MARK: - Leave Group (Safe)
 
-    /// Attempts to leave a home with safety checks:
+    /// Attempts to leave a group with safety checks:
     /// - Cannot leave if you are the only member
     /// - Cannot leave if you are the only admin
-    func leaveHomeSafely(appState: AppState, homeId: String) async -> Bool {
+    func leaveGroupSafely(appState: AppState, groupId: String) async -> Bool {
         errorMessage = nil
         isBusy = true
         defer { isBusy = false }
@@ -33,8 +33,8 @@ final class HomesViewModel: ObservableObject {
         }
 
         do {
-            // Fetch all members of the home
-            let membersSnap = try await FirestoreService.membersCol(homeId).getDocuments()
+            // Fetch all members of the group
+            let membersSnap = try await FirestoreService.membersCol(groupId).getDocuments()
             let members = membersSnap.documents.compactMap {
                 try? $0.data(as: MemberDoc.self)
             }
@@ -57,17 +57,17 @@ final class HomesViewModel: ObservableObject {
             }
 
             // Safe to leave — remove membership
-            try await FirestoreService.membersCol(homeId)
+            try await FirestoreService.membersCol(groupId)
                 .document(user.uid)
                 .delete()
 
             // Clear active selection
-            if appState.activeHome?.id == homeId {
-                appState.activeHome = nil
+            if appState.activeGroup?.id == groupId {
+                appState.activeGroup = nil
                 appState.activeRole = .resident
             }
 
-            await loadHomes(for: user.uid)
+            await loadGroups(for: user.uid)
             return true
 
         } catch {
@@ -76,11 +76,11 @@ final class HomesViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Load Homes (Active)
+    // MARK: - Load Groups (Active)
 
-    /// Loads all homes the user belongs to (based on collectionGroup("members")),
-    /// then fetches each home doc and filters out deleted homes.
-    func loadHomes(for uid: String) async {
+    /// Loads all groups the user belongs to (based on collectionGroup("members")),
+    /// then fetches each group doc and filters out deleted groups.
+    func loadGroups(for uid: String) async {
         errorMessage = nil
         isBusy = true
         defer { isBusy = false }
@@ -93,32 +93,32 @@ final class HomesViewModel: ObservableObject {
                 .whereField("uid", isEqualTo: uid)
                 .getDocuments()
 
-            var loaded: [HomeDoc] = []
+            var loaded: [GroupDoc] = []
 
             for doc in snap.documents {
-                // doc = homes/{homeId}/members/{uid}
-                guard let homeRef = doc.reference.parent.parent else { continue }
+                // doc = groups/{groupId}/members/{uid}
+                guard let groupRef = doc.reference.parent.parent else { continue }
 
-                let homeSnap = try await homeRef.getDocument()
-                guard let data = homeSnap.data() else { continue }
+                let groupSnap = try await groupRef.getDocument()
+                guard let data = groupSnap.data() else { continue }
 
-                // Filter out soft-deleted homes.
+                // Filter out soft-deleted groups.
                 // NOTE: If "isDeleted" is missing, treat as false (active).
                 let isDeleted = data["isDeleted"] as? Bool ?? false
                 if isDeleted { continue }
 
-                let home = HomeDoc(
-                    id: homeRef.documentID,
-                    name: data["name"] as? String ?? "Home",
+                let group = GroupDoc(
+                    id: groupRef.documentID,
+                    name: data["name"] as? String ?? "Group",
                     createdAt: Self.dateFromAny(data["createdAt"]) ?? Date(),
                     createdByUid: data["createdByUid"] as? String ?? ""
                 )
 
-                loaded.append(home)
+                loaded.append(group)
             }
 
-            // Sort homes for nicer UI
-            homes = loaded.sorted {
+            // Sort groups for nicer UI
+            groups = loaded.sorted {
                 $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
             }
 
@@ -128,11 +128,11 @@ final class HomesViewModel: ObservableObject {
     }
 
 
-    // MARK: - Load Homes (Recycle Bin)
+    // MARK: - Load Groups (Recycle Bin)
 
-    /// Loads homes this user belongs to that are currently soft-deleted.
+    /// Loads groups this user belongs to that are currently soft-deleted.
     /// You’ll use this in your future RecycleBinView.
-    func loadDeletedHomes(for uid: String) async -> [HomeDoc] {
+    func loadDeletedGroups(for uid: String) async -> [GroupDoc] {
         errorMessage = nil
 
         do {
@@ -142,25 +142,25 @@ final class HomesViewModel: ObservableObject {
                 .whereField("uid", isEqualTo: uid)
                 .getDocuments()
 
-            var loaded: [HomeDoc] = []
+            var loaded: [GroupDoc] = []
 
             for doc in snap.documents {
-                guard let homeRef = doc.reference.parent.parent else { continue }
+                guard let groupRef = doc.reference.parent.parent else { continue }
 
-                let homeSnap = try await homeRef.getDocument()
-                guard let data = homeSnap.data() else { continue }
+                let groupSnap = try await groupRef.getDocument()
+                guard let data = groupSnap.data() else { continue }
 
                 let isDeleted = data["isDeleted"] as? Bool ?? false
                 if !isDeleted { continue }
 
-                let home = HomeDoc(
-                    id: homeRef.documentID,
-                    name: data["name"] as? String ?? "Home",
+                let group = GroupDoc(
+                    id: groupRef.documentID,
+                    name: data["name"] as? String ?? "Group",
                     createdAt: Self.dateFromAny(data["createdAt"]) ?? Date(),
                     createdByUid: data["createdByUid"] as? String ?? ""
                 )
 
-                loaded.append(home)
+                loaded.append(group)
             }
 
             return loaded.sorted {
@@ -176,9 +176,9 @@ final class HomesViewModel: ObservableObject {
 
     // MARK: - Members (Admin tools you already added)
 
-    func loadMembers(homeId: String) async -> [MemberDoc] {
+    func loadMembers(groupId: String) async -> [MemberDoc] {
         do {
-            let snap = try await FirestoreService.membersCol(homeId).getDocuments()
+            let snap = try await FirestoreService.membersCol(groupId).getDocuments()
             return try snap.documents.map { try $0.data(as: MemberDoc.self) }
                 .sorted { ($0.name ?? $0.email ?? $0.uid) < ($1.name ?? $1.email ?? $1.uid) }
         } catch {
@@ -187,13 +187,13 @@ final class HomesViewModel: ObservableObject {
         }
     }
 
-    func setMemberRole(appState: AppState, homeId: String, memberUid: String, role: MemberRole) async throws {
+    func setMemberRole(appState: AppState, groupId: String, memberUid: String, role: MemberRole) async throws {
         guard let currentUser = appState.authUser else {
             throw NSError(domain: "BillMate", code: 401,
                           userInfo: [NSLocalizedDescriptionKey: "Not signed in."])
         }
 
-        let membersRef = FirestoreService.membersCol(homeId)
+        let membersRef = FirestoreService.membersCol(groupId)
         let currentUserRef = membersRef.document(currentUser.uid)
         let targetRef = membersRef.document(memberUid)
 
@@ -229,7 +229,7 @@ final class HomesViewModel: ObservableObject {
 
             if adminCount <= 1 {
                 throw NSError(domain: "BillMate", code: 400,
-                              userInfo: [NSLocalizedDescriptionKey: "This home must always have at least one admin."])
+                              userInfo: [NSLocalizedDescriptionKey: "This group must always have at least one admin."])
             }
         }
 
@@ -237,17 +237,17 @@ final class HomesViewModel: ObservableObject {
 
         // Refresh local app role immediately if I changed myself
         if currentUser.uid == memberUid {
-            await refreshMyRole(appState: appState, homeId: homeId)
+            await refreshMyRole(appState: appState, groupId: groupId)
         }
     }
 
-    func removeMember(appState: AppState, homeId: String, memberUid: String) async throws {
+    func removeMember(appState: AppState, groupId: String, memberUid: String) async throws {
         guard let currentUser = appState.authUser else {
             throw NSError(domain: "BillMate", code: 401,
                           userInfo: [NSLocalizedDescriptionKey: "Not signed in."])
         }
 
-        let membersRef = FirestoreService.membersCol(homeId)
+        let membersRef = FirestoreService.membersCol(groupId)
         let currentUserRef = membersRef.document(currentUser.uid)
         let targetRef = membersRef.document(memberUid)
 
@@ -283,7 +283,7 @@ final class HomesViewModel: ObservableObject {
 
             if adminCount <= 1 {
                 throw NSError(domain: "BillMate", code: 400,
-                              userInfo: [NSLocalizedDescriptionKey: "This home must always have at least one admin."])
+                              userInfo: [NSLocalizedDescriptionKey: "This group must always have at least one admin."])
             }
         }
 
@@ -291,11 +291,11 @@ final class HomesViewModel: ObservableObject {
     }
 
 
-    // MARK: - Leave Home (Non-admin "I want out" action)
+    // MARK: - Leave Group (Non-admin "I want out" action)
 
-    /// Removes the current user from the home (does NOT delete the home).
-    /// After leaving, refresh your homes list.
-    func leaveHome(appState: AppState, homeId: String) async -> Bool {
+    /// Removes the current user from the group (does NOT delete the group).
+    /// After leaving, refresh your groups list.
+    func leaveGroup(appState: AppState, groupId: String) async -> Bool {
         errorMessage = nil
         isBusy = true
         defer { isBusy = false }
@@ -306,17 +306,17 @@ final class HomesViewModel: ObservableObject {
         }
 
         do {
-            try await FirestoreService.membersCol(homeId)
+            try await FirestoreService.membersCol(groupId)
                 .document(user.uid)
                 .delete()
 
-            // If the user was actively viewing this home, clear it.
-            if appState.activeHome?.id == homeId {
-                appState.activeHome = nil
+            // If the user was actively viewing this group, clear it.
+            if appState.activeGroup?.id == groupId {
+                appState.activeGroup = nil
                 appState.activeRole = .resident
             }
 
-            await loadHomes(for: user.uid)
+            await loadGroups(for: user.uid)
             return true
 
         } catch {
@@ -326,11 +326,11 @@ final class HomesViewModel: ObservableObject {
     }
 
 
-    // MARK: - Soft Delete Home (Moves to recycle bin for 30 days)
+    // MARK: - Soft Delete Group (Moves to recycle bin for 30 days)
 
-    /// Soft deletes a home by marking it deleted and setting an expiration date.
+    /// Soft deletes a group by marking it deleted and setting an expiration date.
     /// There is NO permanent delete button in the app — purge should happen via backend expiry.
-    func softDeleteHome(appState: AppState, homeId: String) async -> Bool {
+    func softDeleteGroup(appState: AppState, groupId: String) async -> Bool {
         errorMessage = nil
         isBusy = true
         defer { isBusy = false }
@@ -344,7 +344,7 @@ final class HomesViewModel: ObservableObject {
         let expires = Calendar.current.date(byAdding: .day, value: 30, to: now) ?? now.addingTimeInterval(30 * 24 * 3600)
 
         do {
-            try await FirestoreService.homeRef(homeId).setData([
+            try await FirestoreService.groupRef(groupId).setData([
                 "isDeleted": true,
                 "deletedAt": Timestamp(date: now),
                 "deleteExpiresAt": Timestamp(date: expires),
@@ -352,13 +352,13 @@ final class HomesViewModel: ObservableObject {
                 "deletedByName": user.name as Any
             ], merge: true)
 
-            // If user is currently in that home, kick them out of active selection.
-            if appState.activeHome?.id == homeId {
-                appState.activeHome = nil
+            // If user is currently in that group, kick them out of active selection.
+            if appState.activeGroup?.id == groupId {
+                appState.activeGroup = nil
                 appState.activeRole = .resident
             }
 
-            await loadHomes(for: user.uid)
+            await loadGroups(for: user.uid)
             return true
 
         } catch {
@@ -367,8 +367,8 @@ final class HomesViewModel: ObservableObject {
         }
     }
 
-    /// Restore a home from the recycle bin.
-    func restoreHome(appState: AppState, homeId: String) async -> Bool {
+    /// Restore a group from the recycle bin.
+    func restoreGroup(appState: AppState, groupId: String) async -> Bool {
         errorMessage = nil
         isBusy = true
         defer { isBusy = false }
@@ -379,7 +379,7 @@ final class HomesViewModel: ObservableObject {
         }
 
         do {
-            try await FirestoreService.homeRef(homeId).setData([
+            try await FirestoreService.groupRef(groupId).setData([
                 "isDeleted": false,
                 "deletedAt": FieldValue.delete(),
                 "deleteExpiresAt": FieldValue.delete(),
@@ -387,7 +387,7 @@ final class HomesViewModel: ObservableObject {
                 "deletedByName": FieldValue.delete()
             ], merge: true)
 
-            await loadHomes(for: user.uid)
+            await loadGroups(for: user.uid)
             return true
 
         } catch {
@@ -397,29 +397,29 @@ final class HomesViewModel: ObservableObject {
     }
 
 
-    // MARK: - Select Home
+    // MARK: - Select Group
 
-    func selectHome(appState: AppState, uid: String, homeId: String) async {
+    func selectGroup(appState: AppState, uid: String, groupId: String) async {
         errorMessage = nil
         isBusy = true
         defer { isBusy = false }
 
         do {
-            let homeSnap = try await FirestoreService.homeRef(homeId).getDocument()
-            guard let homeData = homeSnap.data() else {
+            let groupSnap = try await FirestoreService.groupRef(groupId).getDocument()
+            guard let groupData = groupSnap.data() else {
                 throw NSError(domain: "BillMate", code: 404,
-                              userInfo: [NSLocalizedDescriptionKey: "Home not found."])
+                              userInfo: [NSLocalizedDescriptionKey: "Group not found."])
             }
 
-            // Optional: prevent selecting deleted home
-            let isDeleted = homeData["isDeleted"] as? Bool ?? false
+            // Optional: prevent selecting deleted group
+            let isDeleted = groupData["isDeleted"] as? Bool ?? false
             if isDeleted {
                 throw NSError(domain: "BillMate", code: 400,
-                              userInfo: [NSLocalizedDescriptionKey: "This home is in the Recycle Bin. Restore it to use it."])
+                              userInfo: [NSLocalizedDescriptionKey: "This group is in the Recycle Bin. Restore it to use it."])
             }
 
             let memberSnap = try await FirestoreService
-                .membersCol(homeId)
+                .membersCol(groupId)
                 .document(uid)
                 .getDocument()
 
@@ -428,16 +428,16 @@ final class HomesViewModel: ObservableObject {
                               userInfo: [NSLocalizedDescriptionKey: "Membership not found."])
             }
 
-            let home = HomeDoc(
-                id: homeId,
-                name: homeData["name"] as? String ?? "Home",
-                createdAt: Self.dateFromAny(homeData["createdAt"]) ?? Date(),
-                createdByUid: homeData["createdByUid"] as? String ?? ""
+            let group = GroupDoc(
+                id: groupId,
+                name: groupData["name"] as? String ?? "Group",
+                createdAt: Self.dateFromAny(groupData["createdAt"]) ?? Date(),
+                createdByUid: groupData["createdByUid"] as? String ?? ""
             )
 
             let roleStr = memberData["role"] as? String ?? "resident"
 
-            appState.activeHome = home
+            appState.activeGroup = group
             appState.activeRole = Role(rawValue: roleStr) ?? .resident
 
         } catch {
@@ -448,7 +448,7 @@ final class HomesViewModel: ObservableObject {
 
     // MARK: - Create Invite
 
-    func createInvite(appState: AppState, homeId: String) async -> String? {
+    func createInvite(appState: AppState, groupId: String) async -> String? {
         errorMessage = nil
         isBusy = true
         defer { isBusy = false }
@@ -464,9 +464,9 @@ final class HomesViewModel: ObservableObject {
             ?? now.addingTimeInterval(7 * 24 * 3600)
 
         do {
-            try await FirestoreService.inviteRef(homeId: homeId, code: code)
+            try await FirestoreService.inviteRef(groupId: groupId, code: code)
                 .setData([
-                    "homeId": homeId,
+                    "groupId": groupId,
                     "createdByUid": user.uid,
                     "expiresAt": Timestamp(date: expires),
                     "maxUses": 10,
@@ -484,9 +484,9 @@ final class HomesViewModel: ObservableObject {
     }
 
 
-    // MARK: - Create Home (IMPORTANT: set isDeleted=false)
+    // MARK: - Create Group (IMPORTANT: set isDeleted=false)
 
-    func createHome(appState: AppState, name: String) async -> String? {
+    func createGroup(appState: AppState, name: String) async -> String? {
         errorMessage = nil
         isBusy = true
         defer { isBusy = false }
@@ -498,17 +498,17 @@ final class HomesViewModel: ObservableObject {
 
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            errorMessage = "Home name is required."
+            errorMessage = "Group name is required."
             return nil
         }
 
         do {
-            let homeId = UUID().uuidString
+            let groupId = UUID().uuidString
 
             let code = IDGenerator.inviteCode()
 
-            // Home doc (note isDeleted: false so filtering works)
-            try await FirestoreService.homeRef(homeId).setData([
+            // Group doc (note isDeleted: false so filtering works)
+            try await FirestoreService.groupRef(groupId).setData([
                 "name": trimmed,
                 "createdAt": Timestamp(date: Date()),
                 "createdByUid": user.uid,
@@ -516,7 +516,7 @@ final class HomesViewModel: ObservableObject {
             ], merge: true)
 
             // Creator becomes admin member
-            try await FirestoreService.membersCol(homeId).document(user.uid).setData([
+            try await FirestoreService.membersCol(groupId).document(user.uid).setData([
                 "uid": user.uid,
                 "email": user.email as Any,
                 "name": appState.authUser?.name as Any,
@@ -525,8 +525,8 @@ final class HomesViewModel: ObservableObject {
             ], merge: true)
 
             // Create first invite
-            try await FirestoreService.inviteRef(homeId: homeId, code: code).setData([
-                "homeId": homeId,
+            try await FirestoreService.inviteRef(groupId: groupId, code: code).setData([
+                "groupId": groupId,
                 "createdByUid": user.uid,
                 "expiresAt": Timestamp(date: Calendar.current.date(byAdding: .day, value: 7, to: Date())
                     ?? Date().addingTimeInterval(7 * 24 * 3600)),
@@ -536,7 +536,7 @@ final class HomesViewModel: ObservableObject {
                 "code": code
             ], merge: true)
 
-            await loadHomes(for: user.uid)
+            await loadGroups(for: user.uid)
             return code
 
         } catch {
@@ -546,9 +546,9 @@ final class HomesViewModel: ObservableObject {
     }
 
 
-    // MARK: - Join Home (unchanged)
+    // MARK: - Join Group (unchanged)
 
-    func joinHome(appState: AppState, inviteCode: String) async -> Bool {
+    func joinGroup(appState: AppState, inviteCode: String) async -> Bool {
         errorMessage = nil
         isBusy = true
         defer { isBusy = false }
@@ -577,14 +577,14 @@ final class HomesViewModel: ObservableObject {
                 return false
             }
 
-            guard let homeRef = inviteDoc.reference.parent.parent else {
+            guard let groupRef = inviteDoc.reference.parent.parent else {
                 errorMessage = "Invite malformed."
                 return false
             }
 
-            let homeId = homeRef.documentID
+            let groupId = groupRef.documentID
             let inviteRef = inviteDoc.reference
-            let memberRef = FirestoreService.membersCol(homeId).document(user.uid)
+            let memberRef = FirestoreService.membersCol(groupId).document(user.uid)
 
             try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
                 db.runTransaction({ txn, errPtr -> Any? in
@@ -637,7 +637,7 @@ final class HomesViewModel: ObservableObject {
                 })
             }
 
-            await loadHomes(for: user.uid)
+            await loadGroups(for: user.uid)
             return true
 
         } catch {
@@ -656,19 +656,19 @@ final class HomesViewModel: ObservableObject {
         return nil
     }
     
-    func refreshMyRole(appState: AppState, homeId: String) async {
+    func refreshMyRole(appState: AppState, groupId: String) async {
         guard let user = appState.authUser else { return }
 
         do {
             let memberSnap = try await FirestoreService
-                .membersCol(homeId)
+                .membersCol(groupId)
                 .document(user.uid)
                 .getDocument()
 
             guard let data = memberSnap.data() else {
                 // User is no longer a member
-                if appState.activeHome?.id == homeId {
-                    appState.activeHome = nil
+                if appState.activeGroup?.id == groupId {
+                    appState.activeGroup = nil
                     appState.activeRole = .resident
                 }
                 return
@@ -677,7 +677,7 @@ final class HomesViewModel: ObservableObject {
             let roleStr = data["role"] as? String ?? "resident"
             let newRole = Role(rawValue: roleStr) ?? .resident
 
-            if appState.activeHome?.id == homeId {
+            if appState.activeGroup?.id == groupId {
                 appState.activeRole = newRole
             }
         } catch {

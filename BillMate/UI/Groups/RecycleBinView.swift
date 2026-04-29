@@ -15,13 +15,13 @@ import FirebaseFirestore
 struct RecycleBinView: View {
     @EnvironmentObject private var appState: AppState
 
-    @StateObject private var homesVM = HomesViewModel()
+    @StateObject private var groupsVM = GroupsViewModel()
     @StateObject private var dashVM = DashboardViewModel()
 
     // MARK: - UI State
 
-    @State private var tab: BinTab = .homes
-    @State private var deletedHomes: [HomeDoc] = []
+    @State private var tab: BinTab = .groups
+    @State private var deletedGroups: [GroupDoc] = []
     @State private var deletedBills: [DeletedBillRow] = []
     @State private var deletedPayments: [DeletedPaymentRow] = []
     @State private var memberNames: [String: String] = [:]
@@ -30,10 +30,10 @@ struct RecycleBinView: View {
     @State private var localError: String?
 
     // Confirmation dialogs
-    @State private var homePendingRestore: HomeDoc?
+    @State private var groupPendingRestore: GroupDoc?
 
     enum BinTab: String, CaseIterable, Identifiable {
-        case homes = "Homes"
+        case groups = "Groups"
         case bills = "Bills"
         case payments = "Payments"
 
@@ -51,7 +51,7 @@ struct RecycleBinView: View {
                 .pickerStyle(.segmented)
                 .padding(.horizontal)
 
-                if let err = localError ?? homesVM.errorMessage {
+                if let err = localError ?? groupsVM.errorMessage {
                     Text(err)
                         .foregroundStyle(.red)
                         .multilineTextAlignment(.center)
@@ -60,8 +60,8 @@ struct RecycleBinView: View {
 
                 Group {
                     switch tab {
-                    case .homes:
-                        homesList
+                    case .groups:
+                        groupsList
                     case .bills:
                         billsList
                     case .payments:
@@ -84,22 +84,22 @@ struct RecycleBinView: View {
                 }
             }
             .confirmationDialog(
-                "Restore Home?",
-                isPresented: .constant(homePendingRestore != nil),
+                "Restore Group?",
+                isPresented: .constant(groupPendingRestore != nil),
                 titleVisibility: .visible
             ) {
                 Button("Restore") {
-                    guard let home = homePendingRestore, let homeId = home.id else { return }
-                    homePendingRestore = nil
+                    guard let group = groupPendingRestore, let groupId = group.id else { return }
+                    groupPendingRestore = nil
 
                     Task {
-                        _ = await homesVM.restoreHome(appState: appState, homeId: homeId)
+                        _ = await groupsVM.restoreGroup(appState: appState, groupId: groupId)
                         await refresh()
                     }
                 }
-                Button("Cancel", role: .cancel) { homePendingRestore = nil }
+                Button("Cancel", role: .cancel) { groupPendingRestore = nil }
             } message: {
-                Text("This home will be moved back to your active homes list.")
+                Text("This group will be moved back to your active groups list.")
             }
             .task {
                 await loadMembers()
@@ -108,9 +108,9 @@ struct RecycleBinView: View {
         }
     }
 
-    // MARK: - Homes List
+    // MARK: - Groups List
 
-    private var homesList: some View {
+    private var groupsList: some View {
         List {
             if isLoading {
                 Section {
@@ -122,31 +122,31 @@ struct RecycleBinView: View {
                 }
             }
 
-            if deletedHomes.isEmpty && !isLoading {
+            if deletedGroups.isEmpty && !isLoading {
                 Section {
                     Text("Nothing in the recycle bin.")
                         .foregroundStyle(.secondary)
                 }
             } else {
-                Section("Deleted Homes") {
-                    ForEach(deletedHomes) { home in
+                Section("Deleted Groups") {
+                    ForEach(deletedGroups) { group in
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(home.name)
+                            Text(group.name)
                                 .font(.headline)
 
-                            Text(deletedByText(name: home.deletedByName, uid: home.deletedByUid))
+                            Text(deletedByText(name: group.deletedByName, uid: group.deletedByUid))
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
 
-                            Text(expiresText(expiresAt: home.deleteExpiresAt))
+                            Text(expiresText(expiresAt: group.deleteExpiresAt))
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
                         .contentShape(Rectangle())
-                        .onTapGesture { homePendingRestore = home }
+                        .onTapGesture { groupPendingRestore = group }
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button {
-                                homePendingRestore = home
+                                groupPendingRestore = group
                             } label: {
                                 Label("Restore", systemImage: "arrow.uturn.backward")
                             }
@@ -163,9 +163,9 @@ struct RecycleBinView: View {
 
     private var billsList: some View {
         List {
-            if appState.activeHome?.id == nil {
+            if appState.activeGroup?.id == nil {
                 Section {
-                    Text("Select a home first to view deleted bills.")
+                    Text("Select a group first to view deleted bills.")
                         .foregroundStyle(.secondary)
                 }
             } else {
@@ -181,7 +181,7 @@ struct RecycleBinView: View {
 
                 if deletedBills.isEmpty && !isLoading {
                     Section {
-                        Text("No deleted bills in this home.")
+                        Text("No deleted bills in this group.")
                             .foregroundStyle(.secondary)
                     }
                 } else {
@@ -223,7 +223,7 @@ struct RecycleBinView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .onChange(of: appState.activeHome?.id) { _, _ in
+        .onChange(of: appState.activeGroup?.id) { _, _ in
             Task {
                 await loadMembers()
                 await refreshBillsOnly()
@@ -235,9 +235,9 @@ struct RecycleBinView: View {
 
     private var paymentsList: some View {
         List {
-            if appState.activeHome?.id == nil {
+            if appState.activeGroup?.id == nil {
                 Section {
-                    Text("Select a home first to view deleted payments.")
+                    Text("Select a group first to view deleted payments.")
                         .foregroundStyle(.secondary)
                 }
             } else {
@@ -253,7 +253,7 @@ struct RecycleBinView: View {
 
                 if deletedPayments.isEmpty && !isLoading {
                     Section {
-                        Text("No deleted payments in this home.")
+                        Text("No deleted payments in this group.")
                             .foregroundStyle(.secondary)
                     }
                 } else {
@@ -295,7 +295,7 @@ struct RecycleBinView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .onChange(of: appState.activeHome?.id) { _, _ in
+        .onChange(of: appState.activeGroup?.id) { _, _ in
             Task {
                 await loadMembers()
                 await refreshPaymentsOnly()
@@ -315,7 +315,7 @@ struct RecycleBinView: View {
         isLoading = true
         defer { isLoading = false }
 
-        deletedHomes = await homesVM.loadDeletedHomes(for: uid)
+        deletedGroups = await groupsVM.loadDeletedGroups(for: uid)
         await refreshBillsOnly()
         await refreshPaymentsOnly()
     }
@@ -323,13 +323,13 @@ struct RecycleBinView: View {
     private func refreshBillsOnly() async {
         localError = nil
 
-        guard let homeId = appState.activeHome?.id else {
+        guard let groupId = appState.activeGroup?.id else {
             deletedBills = []
             return
         }
 
         do {
-            let snap = try await FirestoreService.billsCol(homeId)
+            let snap = try await FirestoreService.billsCol(groupId)
                 .whereField("isDeleted", isEqualTo: true)
                 .getDocuments()
 
@@ -381,13 +381,13 @@ struct RecycleBinView: View {
     private func refreshPaymentsOnly() async {
         localError = nil
 
-        guard let homeId = appState.activeHome?.id else {
+        guard let groupId = appState.activeGroup?.id else {
             deletedPayments = []
             return
         }
 
         do {
-            let snap = try await FirestoreService.paymentsCol(homeId)
+            let snap = try await FirestoreService.paymentsCol(groupId)
                 .whereField("isDeleted", isEqualTo: true)
                 .getDocuments()
 
@@ -439,12 +439,12 @@ struct RecycleBinView: View {
     // MARK: - Members
 
     private func loadMembers() async {
-        guard let homeId = appState.activeHome?.id else {
+        guard let groupId = appState.activeGroup?.id else {
             memberNames = [:]
             return
         }
 
-        await dashVM.loadAll(homeId: homeId)
+        await dashVM.loadAll(groupId: groupId)
 
         var map: [String: String] = [:]
         for member in dashVM.members {
@@ -461,11 +461,11 @@ struct RecycleBinView: View {
     // MARK: - Restore
 
     private func restoreBill(_ bill: BillDoc) async {
-        guard let homeId = appState.activeHome?.id,
+        guard let groupId = appState.activeGroup?.id,
               let billId = bill.id else { return }
 
         do {
-            try await FirestoreService.billsCol(homeId)
+            try await FirestoreService.billsCol(groupId)
                 .document(billId)
                 .updateData([
                     "isDeleted": false,
@@ -480,11 +480,11 @@ struct RecycleBinView: View {
     }
 
     private func restorePayment(_ payment: PaymentDoc) async {
-        guard let homeId = appState.activeHome?.id,
+        guard let groupId = appState.activeGroup?.id,
               let paymentId = payment.id else { return }
 
         do {
-            try await FirestoreService.paymentsCol(homeId)
+            try await FirestoreService.paymentsCol(groupId)
                 .document(paymentId)
                 .updateData([
                     "isDeleted": false,

@@ -1,12 +1,12 @@
 import SwiftUI
 
-struct CreateHomeView: View {
+struct CreateGroupView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
 
-    @StateObject private var homesVM = HomesViewModel()
+    @StateObject private var groupsVM = GroupsViewModel()
 
-    @State private var homeName: String = ""
+    @State private var groupName: String = ""
     @State private var createdInviteCode: String?
 
     let onDone: (String?) -> Void
@@ -14,8 +14,8 @@ struct CreateHomeView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Home") {
-                    TextField("Home name", text: $homeName)
+                Section("Group") {
+                    TextField("Group name", text: $groupName)
                 }
 
                 if let code = createdInviteCode {
@@ -27,24 +27,24 @@ struct CreateHomeView: View {
                     }
                 }
 
-                if let err = homesVM.errorMessage {
+                if let err = groupsVM.errorMessage {
                     Section {
                         Text(err).foregroundStyle(.red)
                     }
                 }
 
                 Section {
-                    Button(homesVM.isBusy ? "Creating..." : "Create") {
+                    Button(groupsVM.isBusy ? "Creating..." : "Create") {
                         Task {
-                            let code = await homesVM.createHome(appState: appState, name: homeName)
+                            let code = await groupsVM.createGroup(appState: appState, name: groupName)
                             createdInviteCode = code
                             onDone(code)
                         }
                     }
-                    .disabled(homesVM.isBusy)
+                    .disabled(groupsVM.isBusy)
                 }
             }
-            .navigationTitle("Create Home")
+            .navigationTitle("Create Group")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Close") { dismiss() }

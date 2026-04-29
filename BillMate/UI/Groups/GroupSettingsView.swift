@@ -1,5 +1,5 @@
 //
-//  HomeSettingsView.swift
+//  GroupSettingsView.swift
 //  BillMate
 //
 //  Created by Kyle Solomons on 3/1/26.
@@ -8,9 +8,9 @@
 import SwiftUI
 import FirebaseFirestore
 
-struct HomeSettingsView: View {
+struct GroupSettingsView: View {
     @EnvironmentObject private var appState: AppState
-    @EnvironmentObject private var homesVM: HomesViewModel
+    @EnvironmentObject private var groupsVM: GroupsViewModel
     @Environment(\.dismiss) private var dismiss
 
     // MARK: - Local screen state (keep this view self-contained)
@@ -26,7 +26,7 @@ struct HomeSettingsView: View {
     @State private var confirmLeave = false
     @State private var confirmDelete = false
     
-    @State private var homeName: String = ""
+    @State private var groupName: String = ""
     
     @State private var memberToRemove: MemberDoc?
 
@@ -35,7 +35,7 @@ struct HomeSettingsView: View {
             List {
 
                 // MARK: - Error Banner (nicer UI)
-                if let err = localError ?? homesVM.errorMessage {
+                if let err = localError ?? groupsVM.errorMessage {
                     Section {
                         Text(err)
                             .foregroundStyle(.red)
@@ -45,17 +45,17 @@ struct HomeSettingsView: View {
                 }
                 
                 if appState.activeRole == .admin {
-                    Section("Home Name") {
-                        TextField("Home name", text: $homeName)
+                    Section("Group Name") {
+                        TextField("Group name", text: $groupName)
 
                         Button(isBusy ? "Saving..." : "Save Name") {
-                            Task { await renameHome() }
+                            Task { await renameGroup() }
                         }
                         .disabled(
                             isBusy ||
-                            homeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-                            homeName.trimmingCharacters(in: .whitespacesAndNewlines) ==
-                            (appState.activeHome?.name.trimmingCharacters(in: .whitespacesAndNewlines) ?? "")
+                            groupName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                            groupName.trimmingCharacters(in: .whitespacesAndNewlines) ==
+                            (appState.activeGroup?.name.trimmingCharacters(in: .whitespacesAndNewlines) ?? "")
                         )
                     }
                 }
@@ -73,34 +73,34 @@ struct HomeSettingsView: View {
                 }
 
                 // MARK: - Danger Zone
-                Section("Home") {
+                Section("Group") {
 
-                    // Leave Home (everyone)
+                    // Leave Group (everyone)
                     Button(role: .destructive) {
                         confirmLeave = true
                     } label: {
                         HStack {
                             Image(systemName: "rectangle.portrait.and.arrow.right")
-                            Text("Leave Home")
+                            Text("Leave Group")
                         }
                     }
                     .disabled(isBusy)
 
-                    // Delete Home (admin only)
+                    // Delete Group (admin only)
                     if appState.activeRole == .admin {
                         Button(role: .destructive) {
                             confirmDelete = true
                         } label: {
                             HStack {
                                 Image(systemName: "trash")
-                                Text("Delete Home")
+                                Text("Delete Group")
                             }
                         }
                         .disabled(isBusy)
                     }
                 }
             }
-            .navigationTitle("Home Settings")
+            .navigationTitle("Group Settings")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Close") { dismiss() }
@@ -131,18 +131,18 @@ struct HomeSettingsView: View {
                 }
             } message: {
                 if let member = memberToRemove {
-                    Text("Remove \(displayName(for: member)) from this home?")
+                    Text("Remove \(displayName(for: member)) from this group?")
                 }
             }
 
             // Confirm leave
             .confirmationDialog(
-                "Leave Home?",
+                "Leave Group?",
                 isPresented: $confirmLeave,
                 titleVisibility: .visible
             ) {
-                Button("Leave Home", role: .destructive) {
-                    Task { await leaveHome() }
+                Button("Leave Group", role: .destructive) {
+                    Task { await leaveGroup() }
                 }
                 Button("Cancel", role: .cancel) { }
             } message: {
@@ -151,16 +151,16 @@ struct HomeSettingsView: View {
 
             // Confirm delete
             .confirmationDialog(
-                "Delete Home?",
+                "Delete Group?",
                 isPresented: $confirmDelete,
                 titleVisibility: .visible
             ) {
                 Button("Move to Recycle Bin (30 days)", role: .destructive) {
-                    Task { await deleteHome() }
+                    Task { await deleteGroup() }
                 }
                 Button("Cancel", role: .cancel) { }
             } message: {
-                Text("This home will be recoverable for 30 days. It will expire automatically after that.")
+                Text("This group will be recoverable for 30 days. It will expire automatically after that.")
             }
         }
     }
@@ -198,7 +198,7 @@ struct HomeSettingsView: View {
 
                     Divider()
 
-                    Button("Remove from Home", role: .destructive) {
+                    Button("Remove from Group", role: .destructive) {
                         memberToRemove = m
                     }
                 } label: {
@@ -211,19 +211,19 @@ struct HomeSettingsView: View {
 
     // MARK: - Actions
     
-    private func renameHome() async {
+    private func renameGroup() async {
         localError = nil
 
         guard appState.activeRole == .admin else {
-            localError = "Only admins can rename a home."
+            localError = "Only admins can rename a group."
             return
         }
 
-        guard let homeId = appState.activeHome?.id else { return }
+        guard let groupId = appState.activeGroup?.id else { return }
 
-        let trimmed = homeName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = groupName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            localError = "Home name is required."
+            localError = "Group name is required."
             return
         }
 
@@ -231,13 +231,13 @@ struct HomeSettingsView: View {
         defer { isBusy = false }
 
         do {
-            try await FirestoreService.homeRef(homeId).updateData([
+            try await FirestoreService.groupRef(groupId).updateData([
                 "name": trimmed
             ])
 
-            if var activeHome = appState.activeHome {
-                activeHome.name = trimmed
-                appState.activeHome = activeHome
+            if var activeGroup = appState.activeGroup {
+                activeGroup.name = trimmed
+                appState.activeGroup = activeGroup
             }
         } catch {
             localError = error.localizedDescription
@@ -246,17 +246,17 @@ struct HomeSettingsView: View {
 
     private func reloadMembers() async {
         localError = nil
-        guard let homeId = appState.activeHome?.id else { return }
+        guard let groupId = appState.activeGroup?.id else { return }
 
-        if homeName.isEmpty {
-            homeName = appState.activeHome?.name ?? ""
+        if groupName.isEmpty {
+            groupName = appState.activeGroup?.name ?? ""
         }
         
         isBusy = true
         defer { isBusy = false }
 
         // Everyone can view members; admin required only for actions
-        let loaded = await homesVM.loadMembers(homeId: homeId)
+        let loaded = await groupsVM.loadMembers(groupId: groupId)
         members = loaded
     }
 
@@ -266,13 +266,13 @@ struct HomeSettingsView: View {
             localError = "Only admins can change roles."
             return
         }
-        guard let homeId = appState.activeHome?.id else { return }
+        guard let groupId = appState.activeGroup?.id else { return }
 
         isBusy = true
         defer { isBusy = false }
 
         do {
-            try await homesVM.setMemberRole(appState: appState, homeId: homeId, memberUid: uid, role: role)
+            try await groupsVM.setMemberRole(appState: appState, groupId: groupId, memberUid: uid, role: role)
             await reloadMembers()
 
             if appState.activeRole != .admin {
@@ -290,13 +290,13 @@ struct HomeSettingsView: View {
             confirmRemoveUid = nil
             return
         }
-        guard let homeId = appState.activeHome?.id else { return }
+        guard let groupId = appState.activeGroup?.id else { return }
 
         isBusy = true
         defer { isBusy = false }
 
         do {
-            try await homesVM.removeMember(appState: appState, homeId: homeId, memberUid: uid)
+            try await groupsVM.removeMember(appState: appState, groupId: groupId, memberUid: uid)
             confirmRemoveUid = nil
             await reloadMembers()
         } catch {
@@ -304,38 +304,38 @@ struct HomeSettingsView: View {
         }
     }
 
-    private func leaveHome() async {
+    private func leaveGroup() async {
         localError = nil
-        guard let homeId = appState.activeHome?.id else { return }
+        guard let groupId = appState.activeGroup?.id else { return }
 
         isBusy = true
         defer { isBusy = false }
 
-        let ok = await homesVM.leaveHomeSafely(appState: appState, homeId: homeId)
+        let ok = await groupsVM.leaveGroupSafely(appState: appState, groupId: groupId)
         if ok {
             dismiss()
         } else {
-            // homesVM.errorMessage already set; keep this for consistency
-            localError = homesVM.errorMessage
+            // groupsVM.errorMessage already set; keep this for consistency
+            localError = groupsVM.errorMessage
         }
     }
 
-    private func deleteHome() async {
+    private func deleteGroup() async {
         localError = nil
         guard appState.activeRole == .admin else {
-            localError = "Only admins can delete a home."
+            localError = "Only admins can delete a group."
             return
         }
-        guard let homeId = appState.activeHome?.id else { return }
+        guard let groupId = appState.activeGroup?.id else { return }
 
         isBusy = true
         defer { isBusy = false }
 
-        let ok = await homesVM.softDeleteHome(appState: appState, homeId: homeId)
+        let ok = await groupsVM.softDeleteGroup(appState: appState, groupId: groupId)
         if ok {
             dismiss()
         } else {
-            localError = homesVM.errorMessage
+            localError = groupsVM.errorMessage
         }
     }
 
